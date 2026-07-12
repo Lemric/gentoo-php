@@ -129,10 +129,12 @@ COPY scripts/docker-php-pecl-install /usr/local/bin/docker-php-pecl-install
 COPY scripts/docker-php-env /usr/local/bin/docker-php-env
 COPY scripts/build/install-lib /usr/local/bin/install-lib
 COPY scripts/build/configure-php.sh /usr/local/bin/configure-php.sh
+COPY scripts/build/fix-fpm-config.sh /usr/local/bin/fix-fpm-config.sh
 COPY scripts/build/setup-fpm-config.sh /usr/local/bin/setup-fpm-config.sh
 COPY scripts/build/verify-php-tarball.sh /usr/local/bin/verify-php-tarball.sh
 RUN chmod +x /usr/local/bin/docker-php-* /usr/local/bin/install-lib \
-              /usr/local/bin/configure-php.sh /usr/local/bin/setup-fpm-config.sh \
+              /usr/local/bin/configure-php.sh /usr/local/bin/fix-fpm-config.sh \
+              /usr/local/bin/setup-fpm-config.sh \
               /usr/local/bin/verify-php-tarball.sh
 
 WORKDIR /usr/src
@@ -199,8 +201,8 @@ RUN mkdir -p /staging/usr/local \
     && analyze-deps.sh /staging /usr/local
 
 FROM builder-php AS collect-fpm
-COPY scripts/build/collect-runtime.sh scripts/build/analyze-deps.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/collect-runtime.sh /usr/local/bin/analyze-deps.sh
+COPY scripts/build/collect-runtime.sh scripts/build/analyze-deps.sh scripts/build/fix-fpm-config.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/collect-runtime.sh /usr/local/bin/analyze-deps.sh /usr/local/bin/fix-fpm-config.sh
 RUN mkdir -p /staging/usr/local \
     && cp -a /usr/local/. /staging/usr/local/ \
     && collect-runtime.sh /staging /usr/local fpm \

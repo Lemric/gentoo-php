@@ -10,6 +10,7 @@ eval "$(docker-php-env)"
 
 ./buildconf --force
 ./configure \
+    --prefix=/usr/local \
     --build="$(gcc -dumpmachine)" \
     --with-config-file-path="${PHP_INI_DIR}" \
     --with-config-file-scan-dir="${PHP_INI_DIR}/conf.d" \

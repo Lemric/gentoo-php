@@ -139,12 +139,15 @@ fi
 # FPM variant: drop CLI-only debug tooling (official fpm image has no phpdbg)
 if [ "${VARIANT}" = "fpm" ]; then
     rm -f "${STAGING}${PREFIX}/bin/phpdbg" 2>/dev/null || true
+    if [ -x /usr/local/bin/fix-fpm-config.sh ]; then
+        /usr/local/bin/fix-fpm-config.sh "${STAGING}${PREFIX}"
+    fi
 fi
 
 # Remove build/SDK artifacts — never ship in scratch runtime
 for tool in phpize php-config pecl pear docker-php-source docker-php-ext-configure \
     docker-php-ext-install docker-php-ext-enable docker-php-pecl-install \
-    docker-php-env install-lib configure-php.sh setup-fpm-config.sh \
+    docker-php-env install-lib configure-php.sh setup-fpm-config.sh fix-fpm-config.sh \
     collect-runtime.sh analyze-deps.sh; do
     rm -f "${STAGING}${PREFIX}/bin/${tool}" 2>/dev/null || true
 done

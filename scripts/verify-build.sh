@@ -52,6 +52,7 @@ docker images --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}' | grep -E "cl
 step "4/8  Smoke tests"
 docker run --rm "${IMG_CLI}" php -v
 docker run --rm --entrypoint "${ENTRYPOINT}" "${IMG_FPM}" php-fpm -v
+docker run --rm --entrypoint "${ENTRYPOINT}" "${IMG_FPM}" php-fpm -t
 
 step "5/8  Base extensions + nonroot"
 docker run --rm "${IMG_CLI}" php -r 'echo "PHP " . PHP_VERSION . PHP_EOL;'
