@@ -73,9 +73,21 @@ Interfejs identyczny:
 - `docker-php-export-runtime` (eksport overlay do multi-stage)
 - `docker-php-entrypoint` (identyczny skrypt jak w [docker-library/php](https://github.com/docker-library/php/blob/master/8.5/alpine3.24/cli/docker-php-entrypoint))
 
-Bazowy zestaw rozszerzeń odpowiada świeżemu `php:8.5-cli` / `php:8.5-fpm`.  
-Runtime ini (`proc_open`, `putenv`, `allow_url_fopen`, brak `open_basedir`) — **zgodność z docker-library** pod Symfony/Laravel.  
-**Nie ma** gd, intl, zip, pdo_mysql — dokładasz je świadomie.
+Bazowy zestaw rozszerzeń = **core only** (jak `php:8.5-cli` / `php:8.5-fpm`).  
+**Nie ma** gd, intl, zip, pdo_mysql — dokładasz w multi-stage (`cli-build` / `fpm-build`) lub w `builder-php`.  
+Runtime ini — zgodność z docker-library. OPcache **wyłączony** w base (jak official); opcjonalnie `configs/php/conf.d/opcache-production.ini`.  
+Redis, xdebug itd. — multi-stage z `docker-php-pie-install`.
+
+### OPcache (opcjonalnie, produkcja)
+
+Base FPM = **OPcache off** (jak `php:8.5-fpm`). W obrazie aplikacji:
+
+```dockerfile
+COPY configs/php/conf.d/opcache-production.ini /usr/local/etc/php/conf.d/
+# po deploy: kill -USR2 $(cat /tmp/php-fpm.pid)  # reload workers
+```
+
+Extra lockdown (wyłącza Composer/queue): `configs/php/conf.d/hardening-strict.ini`.
 
 ## Dokładanie rozszerzeń
 
@@ -138,14 +150,13 @@ Pełna mapa: [scripts/build/install-lib](scripts/build/install-lib)
 - **Composer, artisan, queue** — `proc_open`, `putenv`, `pcntl`, `symlink` dostępne (jak official)
 - **Brak** bash, gcc, emerge, phpize, PIE w runtime
 
-### `fpm` (produkcja — hardened, bez shella)
+### `fpm` (produkcja — framework runtime + entrypoint)
 
-- `php-fpm` + ldd closure — **zero** `/bin/sh`
-- `hardening-production.ini` — bezpieczne domyślne prod (bez `disable_functions`; zgodność z docker-library)
-- FPM: `security.limit_extensions = .php`, ping `/fpm-ping` — **bez** `open_basedir`
-- Probes: `php /usr/local/libexec/php/docker-php-healthcheck.php`
-
-Opcjonalny extra lockdown (Composer/queue/Process przestaną działać): skopiuj `configs/php/conf.d/hardening-strict.ini` do obrazu aplikacji.
+- `php-fpm` + ldd closure — minimalny **`/bin/sh`** tylko dla `docker-php-entrypoint` (jak official)
+- **`ENTRYPOINT docker-php-entrypoint`** + **`CMD php-fpm`**
+- `hardening-production.ini` — prod defaults (docker-library parity)
+- FPM: `security.limit_extensions = .php`, ping `/fpm-ping`
+- **OPcache off** w base; opcjonalnie skopiuj `configs/php/conf.d/opcache-production.ini`
 
 ### `cli-build` / `fpm-build` (tylko multi-stage)
 
@@ -159,7 +170,7 @@ Każdy skrypt instalacji kończy się **obowiązkowym cleanup** (temp, cache, st
 - Gentoo **hardened** profile (PIE, SSP, CET)
 - **FULL RELRO** (`-Wl,-z,now`)
 - **FORTIFY_SOURCE=3**
-- Produkcja **CLI**: statyczny `/bin/sh` (busybox) — skrypty shell, **FPM**: bez shella
+- Produkcja **CLI**: statyczny busybox; **FPM**: busybox `/bin/sh` tylko pod `docker-php-entrypoint`
 - **fail-closed** `harden-runtime.sh` + `verify-hardening.sh`
 - Zawsze **USER 82:82** (www-data)
 - FPM: **SIGQUIT**, `security.limit_extensions`
@@ -221,8 +232,9 @@ volumes:
 |---|----------|----------------|
 | Baza | Debian | scratch |
 | FPM root | tak (setuid) | **nie** (zawsze www-data) |
-| Shell | `/bin/sh` (dash) | **cli**: statyczny busybox; **fpm**: brak |
-| Entrypoint | shell wrapper | **cli**: `docker-php-entrypoint`; **fpm**: `php-fpm` |
+| Shell | `/bin/sh` (dash) | **cli**: busybox; **fpm**: busybox tylko pod entrypoint |
+| Entrypoint | `docker-php-entrypoint` | **cli + fpm**: `docker-php-entrypoint` |
+| OPcache (base FPM) | off | off (opcjonalny `opcache-production.ini`) |
 | Optymalizacja | `-O2` | `-O3` + ThinLTO + `-march` |
 
 ## Struktura projektu

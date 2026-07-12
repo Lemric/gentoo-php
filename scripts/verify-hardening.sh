@@ -40,13 +40,15 @@ if [ "${PROFILE}" = "cli" ]; then
         echo "OK: build tools absent\n";
     ' || fail "forbidden paths in CLI"
 else
+    docker run --rm "${IMAGE}" php-fpm -t >/dev/null \
+        || fail "FPM entrypoint + php-fpm -t"
+
     docker run --rm --entrypoint /usr/local/bin/php "${IMAGE}" -r '
         $forbidden = [
-            "/bin/sh", "/bin/busybox",
-            "/usr/local/bin/docker-php-entrypoint",
             "/usr/bin/emerge", "/usr/bin/gcc",
             "/usr/local/bin/pie", "/usr/local/bin/phpize",
             "/usr/local/libexec/install",
+            "/usr/bin/wget", "/usr/bin/env",
         ];
         foreach ($forbidden as $path) {
             if (file_exists($path)) {
@@ -54,11 +56,15 @@ else
                 exit(1);
             }
         }
-        if (is_dir("/bin") && count(scandir("/bin")) > 2) {
-            fwrite(STDERR, "forbidden: /bin is populated\n");
+        if (!is_file("/bin/sh") || !is_file("/bin/busybox")) {
+            fwrite(STDERR, "missing entrypoint shell\n");
             exit(1);
         }
-        echo "OK: forbidden paths absent\n";
+        if (!is_executable("/usr/local/bin/docker-php-entrypoint")) {
+            fwrite(STDERR, "missing docker-php-entrypoint\n");
+            exit(1);
+        }
+        echo "OK: FPM entrypoint shell only\n";
     ' || fail "forbidden paths in FPM"
 fi
 

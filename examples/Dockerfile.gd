@@ -7,7 +7,7 @@
 #   docker build -f examples/Dockerfile.gd -t my/php:8.5-cli-gd .
 #
 # For production without extra extensions, use cli/fpm directly.
-# For extensions baked into base image, prefer stage builder-php in docker/Dockerfile.
+# For extensions baked into your app image, use cli-build/fpm-build multi-stage (see README).
 
 ARG CLI_IMAGE=ghcr.io/lemric/gentoo-php/php:cli-8.5.8
 ARG CLI_BUILD_IMAGE=ghcr.io/lemric/gentoo-php/php:cli-build-8.5.8

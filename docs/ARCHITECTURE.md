@@ -162,9 +162,9 @@ Official `php-fpm` starts as root, drops to `www-data`. We run `USER 82:82` from
 
 **FPM production config:**
 - `pm = dynamic` with tuned spare servers
-- `opcache.enable=1`, `validate_timestamps=1`, JIT `1255` / 128M buffer
-- `realpath_cache_size=4096K`
+- OPcache **off** in base (optional `configs/php/conf.d/opcache-production.ini` downstream)
 - `daemonize = no`, logs to `/proc/self/fd/2`
+- `ENTRYPOINT docker-php-entrypoint`, `CMD php-fpm` (docker-library parity)
 - `HEALTHCHECK`: `php docker-php-healthcheck.php health`
 - FPM probes: startup (`php-fpm -t`), liveness/readiness (PHP script)
 - Pool: `security.limit_extensions = .php`, ping `/fpm-ping` (no `open_basedir`; `allow_url_fopen` via php.ini)
@@ -185,7 +185,7 @@ Static busybox `/bin/sh` + `/usr/bin/env` + `/usr/bin/php` symlink — **CLI pro
 
 ### scratch-runtime (FPM)
 
-No shell — passwd, CA, `/tmp` only.
+Static busybox `/bin/sh` + `docker-php-entrypoint` only (no wget/env). passwd, CA, `/tmp`.
 
 ### scratch-runtime-build
 
@@ -298,7 +298,7 @@ docker buildx bake -f docker-bake.hcl all
 | NX/ASLR | Kernel + PIE (runtime) |
 | CET | `USE=cet` where CPU supports |
 | Non-root | USER 82:82 always |
-| No shell (fpm) | FPM: zero `/bin/sh`; CLI: static busybox only |
+| No shell (fpm) | FPM: busybox `/bin/sh` for entrypoint only; CLI: full busybox |
 | PHP lockdown | `hardening-production.ini` — prod defaults, no `disable_functions` (docker-library parity) |
 | FPM pool | `security.limit_extensions`; optional `hardening-strict.ini` downstream |
 | Read-only FS | K8s `readOnlyRootFilesystem` + `/tmp` emptyDir |
@@ -312,12 +312,13 @@ docker buildx bake -f docker-bake.hcl all
 |------|----------|----------------|
 | Base OS | Debian slim | scratch |
 | Root user | FPM starts root | Always nonroot |
-| Shell | `/bin/sh` (dash) | **none** in cli/fpm; busybox only in `*-build` |
-| Entrypoint | shell wrapper | direct `php` / `php-fpm` |
+| Shell | `/bin/sh` (dash) | busybox (FPM: entrypoint-only) |
+| Entrypoint | `docker-php-entrypoint` | same |
 | Compiler flags | `-O2` | `-O3` + ThinLTO |
 | phpdbg | CLI only | CLI builder only, stripped from runtime |
 | pear/pecl in runtime | Present | SDK only (PIE, not PECL) |
-| opcache in base CLI | Not enabled | Not enabled (FPM: production ini) |
+| Base extensions | core only | core only (gd/intl/zip/mysql via multi-stage) |
+| opcache in base FPM | Not enabled | Not enabled (optional ini) |
 | Runtime PHP ini | php.ini-production defaults | Same intent — no `disable_functions`, `allow_url_fopen=On` |
 
 All deviations are documented and justified by the priority order.

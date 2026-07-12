@@ -61,7 +61,7 @@ docker run --rm --entrypoint /bin/sh "${IMG_CLI}" -c '
     printf "%s\n" "#!/usr/bin/env php" "<?php echo \"env-shebang-ok\\n\";" > /tmp/t.php
     chmod +x /tmp/t.php && /tmp/t.php | grep -q env-shebang-ok && echo "  [OK] #!/usr/bin/env php"
 '
-docker run --rm "${IMG_FPM}" /usr/local/sbin/php-fpm -t
+docker run --rm "${IMG_FPM}" php-fpm -t
 docker run --rm --entrypoint /usr/local/bin/php "${IMG_FPM}" "${HEALTHCHECK}" readiness
 
 step "6/9  Base extensions + HTTPS + framework runtime (CLI/FPM)"
@@ -110,6 +110,14 @@ docker run --rm --entrypoint /usr/local/bin/php "${IMG_FPM}" -r '
 for ext in curl mbstring openssl pdo_sqlite sqlite3 sodium ftp; do
     docker run --rm "${IMG_CLI}" -m | grep -qi "^${ext}$" && echo "  [OK] ${ext}" || echo "  [MISS] ${ext}"
 done
+docker run --rm "${IMG_CLI}" -r '
+    if (extension_loaded("Zend OPcache")) { fwrite(STDERR, "CLI OPcache should be off in base\n"); exit(1); }
+    echo "  [OK] CLI OPcache off (official parity)\n";
+'
+docker run --rm --entrypoint /usr/local/bin/php "${IMG_FPM}" -r '
+    if (extension_loaded("Zend OPcache")) { fwrite(STDERR, "FPM OPcache should be off in base\n"); exit(1); }
+    echo "  [OK] FPM OPcache off (official parity)\n";
+'
 
 CLI_UID=$(docker run --rm "${IMG_CLI}" -r 'echo posix_getuid();')
 [ "${CLI_UID}" != "0" ] || fail "CLI runs as root"

@@ -190,22 +190,22 @@ RUN --mount=type=cache,target=/var/cache/distfiles,id=gentoo-distfiles-${GENTOO_
     && chmod 755 /usr/local/bin/pie \
     && emerge --verbose dev-vcs/git app-arch/unzip
 
-# Optional extensions — uncomment once:
-# RUN install-lib libjpeg libpng freetype \
-#     && docker-php-ext-configure gd --with-freetype --with-jpeg \
-#     && docker-php-ext-install -j"$(nproc)" gd
-
 RUN --mount=type=cache,target=/var/cache/ccache,id=gentoo-ccache-${GENTOO_CACHE_ID},sharing=locked \
     --mount=type=tmpfs,target=/tmp/php-build,size=8589934592 \
     configure-php.sh \
     && setup-fpm-config.sh \
     && pie -V
 
-COPY configs/php/conf.d/opcache-production.ini /usr/local/etc/php/conf.d/
+# Optional extensions — add here or via cli-build/fpm-build multi-stage (official base = core only):
+# RUN install-lib libjpeg libpng freetype icu libzip \
+#     && docker-php-ext-configure gd --enable-gd --with-freetype --with-jpeg \
+#     && docker-php-ext-install -j"$(nproc)" gd intl zip pdo_mysql mysqli
+
 COPY configs/php/conf.d/docker-fpm.ini /usr/local/etc/php/conf.d/
 COPY configs/php/conf.d/ca-bundle.ini /usr/local/etc/php/conf.d/
 COPY configs/php/conf.d/hardening-production.ini /usr/local/etc/php/conf.d/
 COPY configs/php/conf.d/allow-url.ini /usr/local/etc/php/conf.d/
+# opcache-production.ini — optional downstream overlay (official base keeps OPcache off)
 
 # -----------------------------------------------------------------------------
 # collect-* — runtime (minimal) vs *-build (install stack for multi-stage Dockerfiles)
@@ -253,17 +253,19 @@ RUN mkdir -p /staging/usr/local /staging/usr/src \
     && ! grep -Fq 'NONE/' /staging/usr/local/etc/php-fpm.conf
 
 # -----------------------------------------------------------------------------
-# scratch-runtime — hardened production skeleton (no shell, no package manager)
+# scratch-runtime — FPM skeleton + minimal /bin/sh for docker-php-entrypoint (docker-library parity)
 # scratch-runtime-build — busybox + entrypoint for cli-build / fpm-build only
 # -----------------------------------------------------------------------------
 FROM builder-base AS scratch-runtime
 ARG NONROOT_UID
 ARG NONROOT_GID
 ARG NONROOT_USER
+ARG PORTAGE_TMPFS_SIZE
+ARG GENTOO_CACHE_ID
 
 COPY scripts/build/ensure-ca-bundle.sh /usr/local/bin/ensure-ca-bundle.sh
 RUN chmod +x /usr/local/bin/ensure-ca-bundle.sh \
-    && mkdir -p /rootfs/etc /rootfs/tmp /rootfs/var/www/html \
+    && mkdir -p /rootfs/etc /rootfs/tmp /rootfs/usr/local/bin /rootfs/var/www/html \
     && printf '%s:x:%s:%s:%s:/var/www/html:/sbin/nologin\n' \
         "${NONROOT_USER}" "${NONROOT_UID}" "${NONROOT_GID}" "${NONROOT_USER}" \
         > /rootfs/etc/passwd \
@@ -277,8 +279,26 @@ RUN chmod +x /usr/local/bin/ensure-ca-bundle.sh \
     && cp /etc/protocols /rootfs/etc/protocols \
     && ensure-ca-bundle.sh /rootfs
 
+COPY --from=toolchain /usr/local/bin/docker-php-entrypoint /rootfs/usr/local/bin/docker-php-entrypoint
+
+RUN --mount=type=cache,target=/var/cache/distfiles,id=gentoo-distfiles-${GENTOO_CACHE_ID},sharing=locked \
+    --mount=type=cache,target=/var/cache/binhost,id=gentoo-binhost-${GENTOO_CACHE_ID},sharing=locked \
+    --mount=type=cache,target=/var/cache/ccache,id=gentoo-ccache-${GENTOO_CACHE_ID},sharing=locked \
+    --mount=type=tmpfs,target=/var/tmp/portage,size=${PORTAGE_TMPFS_SIZE} \
+    mkdir -p /var/tmp/portage /var/cache/binhost \
+    && export PORTAGE_TMPDIR=/var/tmp/portage \
+    && emerge --verbose sys-apps/busybox \
+    && BB="$(readlink -f "$(command -v busybox)")" \
+    && mkdir -p /rootfs/bin \
+    && cp -L "${BB}" /rootfs/bin/busybox \
+    && strip --strip-all /rootfs/bin/busybox \
+    && ln -sf busybox /rootfs/bin/sh \
+    && file /rootfs/bin/busybox | grep -qi 'statically linked' \
+    && chmod 755 /rootfs/usr/local/bin/docker-php-entrypoint \
+    && head -n1 /rootfs/usr/local/bin/docker-php-entrypoint | grep -q '^#!/bin/sh$' \
+    && echo fpm-entrypoint-ok
+
 # CLI production: static busybox /bin/sh + upstream entrypoint (script runners, docker-library parity).
-# FPM stays on scratch-runtime (no shell).
 FROM builder-base AS scratch-runtime-cli
 ARG NONROOT_UID
 ARG NONROOT_GID
@@ -473,8 +493,8 @@ STOPSIGNAL SIGQUIT
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD ["/usr/local/bin/php", "/usr/local/libexec/php/docker-php-healthcheck.php", "health"]
 
-ENTRYPOINT ["/usr/local/sbin/php-fpm"]
-CMD ["-F"]
+ENTRYPOINT ["/usr/local/bin/docker-php-entrypoint"]
+CMD ["php-fpm"]
 
 FROM scratch AS fpm-build
 ARG PHP_VERSION

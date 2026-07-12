@@ -119,7 +119,7 @@ jobs:
           docker run --rm "$cli" test ! -x /usr/local/bin/phpize
           docker run --rm "$build" test -x /usr/local/bin/pie
           docker run --rm "$build" test -x /usr/local/bin/phpize
-          docker run --rm "$fpm" /usr/local/sbin/php-fpm -t
+          docker run --rm "${repo}:fpm-${ver}${suffix}" php-fpm -t
           docker run --rm --entrypoint /usr/local/bin/php "$fpm" /usr/local/libexec/php/docker-php-healthcheck.php readiness
 
   manifest:
