@@ -129,12 +129,14 @@ Pełna mapa: [scripts/build/install-lib](scripts/build/install-lib)
 
 ## Scratch — co jest w obrazie
 
-### `cli` / `fpm` (produkcja)
+### `cli` / `fpm` (produkcja — hardened)
 
-- `php` / `php-fpm` + ldd closure (OpenSSL, libgcc, …)
-- CA certificates, passwd/group, `/bin/sh` (busybox)
-- `php.ini` + `conf.d/`, healthcheck, entrypoint
-- **Bez:** gcc, emerge, phpize, PIE, nagłówków, install stack
+- Tylko `php` / `php-fpm` + ldd closure (OpenSSL, libgcc)
+- CA certs, passwd/group, `/tmp` (mount `emptyDir` w K8s)
+- **Brak** `/bin/sh`, busybox, gcc, emerge, phpize, PIE, entrypoint shell
+- `hardening-production.ini` — wyłączone `exec`/`proc_open`/`shell_exec`/…
+- FPM: `security.limit_extensions`, `open_basedir`, `allow_url_* = Off`
+- Probes: `php /usr/local/libexec/php/docker-php-healthcheck.php`
 
 ### `cli-build` / `fpm-build` (tylko multi-stage)
 
@@ -148,27 +150,30 @@ Każdy skrypt instalacji kończy się **obowiązkowym cleanup** (temp, cache, st
 - Gentoo **hardened** profile (PIE, SSP, CET)
 - **FULL RELRO** (`-Wl,-z,now`)
 - **FORTIFY_SOURCE=3**
-- **ThinLTO** + `-O3` + `-march=x86-64-v3` (amd64)
+- Produkcja **bez shella** — zero `/bin/sh`, zero busybox
+- **fail-closed** `harden-runtime.sh` + `verify-hardening.sh`
 - Zawsze **USER 82:82** (www-data)
-- FPM: **SIGQUIT** graceful shutdown
-- **HEALTHCHECK** — `docker-php-healthcheck` (startup / liveness / readiness)
-- CI: BuildKit GHA cache, multi-arch manifests
+- FPM: **SIGQUIT**, `security.limit_extensions`, `open_basedir`
+- **HEALTHCHECK** — PHP probes (bez sh)
+- CI: multi-arch manifests, BuildKit cache
 
 ## Health probes (Docker / Kubernetes)
 
-Wbudowany `/usr/local/bin/docker-php-healthcheck`:
+Wbudowany `/usr/local/libexec/php/docker-php-healthcheck.php` (PHP, bez shell):
 
 | Probe | FPM | CLI |
 |-------|-----|-----|
-| `startup` | `php-fpm -t` (config) | PHP ≥ 8.0 |
-| `liveness` | PID file lub port `:9000` | PHP runtime |
-| `readiness` | FastCGI **ping** (`/fpm-ping` → `pong`) | core extensions |
-| `health` (domyślny `HEALTHCHECK`) | liveness + readiness | readiness |
+| `startup` | `php-fpm -t` (K8s) / sanity config | PHP ≥ 8.0 |
+| `liveness` | PID file lub port `:9000` | always OK |
+| `readiness` | FastCGI ping (`/fpm-ping` → `pong`) | core extensions |
+| `health` | liveness + readiness | readiness |
 
 ```bash
-docker-php-healthcheck startup
-docker-php-healthcheck liveness
-docker-php-healthcheck readiness
+docker run --rm ghcr.io/lemric/gentoo-php/php:cli-8.5.8 \
+  /usr/local/libexec/php/docker-php-healthcheck.php health
+docker run --rm ghcr.io/lemric/gentoo-php/php:fpm-8.5.8 php-fpm -t
+docker run --rm --entrypoint php ghcr.io/lemric/gentoo-php/php:fpm-8.5.8 \
+  /usr/local/libexec/php/docker-php-healthcheck.php readiness
 ```
 
 FPM pool ma `ping.path = /fpm-ping` i `ping.response = pong` (konfigurowalne przez env).
@@ -183,8 +188,16 @@ securityContext:
   runAsUser: 82
   readOnlyRootFilesystem: true
   allowPrivilegeEscalation: false
+  seccompProfile:
+    type: RuntimeDefault
   capabilities:
     drop: ["ALL"]
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+volumes:
+  - name: tmp
+    emptyDir: {}
 ```
 
 ## Różnice względem oficjalnego obrazu
@@ -193,7 +206,8 @@ securityContext:
 |---|----------|----------------|
 | Baza | Debian | scratch |
 | FPM root | tak (setuid) | **nie** (zawsze www-data) |
-| Shell | `/bin/sh` (dash) | `/bin/sh` (statyczny busybox) |
+| Shell | `/bin/sh` (dash) | **brak** (produkcja) / busybox tylko w `*-build` |
+| Entrypoint | shell script | bezpośrednio `php` / `php-fpm` |
 | Optymalizacja | `-O2` | `-O3` + ThinLTO + `-march` |
 
 ## Struktura projektu

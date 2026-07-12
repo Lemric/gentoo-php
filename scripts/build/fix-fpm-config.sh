@@ -57,6 +57,11 @@ printf '%s\n' \
     'request_terminate_timeout = 300s' \
     'ping.path = /fpm-ping' \
     'ping.response = pong' \
+    'security.limit_extensions = .php' \
+    'php_admin_flag[expose_php] = off' \
+    'php_admin_flag[allow_url_fopen] = off' \
+    'php_admin_flag[allow_url_include] = off' \
+    'php_admin_value[open_basedir] = /var/www/html:/tmp' \
     >> "${FPM_D}/zz-docker.conf"
 
 if grep -Fq 'NONE/' "${ETC}/php-fpm.conf"; then

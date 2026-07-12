@@ -143,15 +143,16 @@ COPY scripts/build/fix-fpm-config.sh /usr/local/bin/fix-fpm-config.sh
 COPY configs/fpm/php-fpm.conf /usr/local/share/gentoo-php/fpm/php-fpm.conf
 COPY scripts/build/setup-fpm-config.sh /usr/local/bin/setup-fpm-config.sh
 COPY scripts/build/verify-php-tarball.sh /usr/local/bin/verify-php-tarball.sh
-COPY scripts/health/docker-php-healthcheck /usr/local/bin/docker-php-healthcheck
+COPY scripts/health/docker-php-healthcheck.php /usr/local/libexec/php/docker-php-healthcheck.php
 COPY scripts/health/fpm-ping.php /usr/local/libexec/php/fpm-ping.php
+COPY scripts/build/harden-runtime.sh /usr/local/bin/harden-runtime.sh
 RUN chmod +x /usr/local/bin/docker-php-* /usr/local/bin/install-lib \
               /usr/local/bin/merge-install-root.sh /usr/local/bin/bundle-install-stack.sh \
               /usr/local/bin/docker-php-install-env.sh /usr/local/bin/docker-php-install-cleanup.sh \
               /usr/local/bin/docker-php-export-runtime.sh \
               /usr/local/bin/configure-php.sh /usr/local/bin/fix-fpm-config.sh \
-              /usr/local/bin/setup-fpm-config.sh /usr/local/bin/docker-php-healthcheck \
-              /usr/local/bin/verify-php-tarball.sh \
+              /usr/local/bin/setup-fpm-config.sh /usr/local/bin/verify-php-tarball.sh \
+              /usr/local/bin/harden-runtime.sh \
     && ln -sf docker-php-pie-install /usr/local/bin/docker-php-pecl-install \
     && mkdir -p /usr/local/libexec/php /usr/local/share/gentoo-php
 
@@ -201,13 +202,14 @@ RUN --mount=type=cache,target=/var/cache/ccache,id=gentoo-ccache-${GENTOO_CACHE_
 
 COPY configs/php/conf.d/opcache-production.ini /usr/local/etc/php/conf.d/
 COPY configs/php/conf.d/docker-fpm.ini /usr/local/etc/php/conf.d/
+COPY configs/php/conf.d/hardening-production.ini /usr/local/etc/php/conf.d/
 
 # -----------------------------------------------------------------------------
 # collect-* — runtime (minimal) vs *-build (install stack for multi-stage Dockerfiles)
 # -----------------------------------------------------------------------------
 FROM builder-php AS collect-cli
-COPY scripts/build/collect-runtime.sh scripts/build/analyze-deps.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/collect-runtime.sh /usr/local/bin/analyze-deps.sh
+COPY scripts/build/collect-runtime.sh scripts/build/analyze-deps.sh scripts/build/harden-runtime.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/collect-runtime.sh /usr/local/bin/analyze-deps.sh /usr/local/bin/harden-runtime.sh
 RUN mkdir -p /staging/usr/local \
     && cp -a /usr/local/. /staging/usr/local/ \
     && collect-runtime.sh /staging /usr/local cli runtime \
@@ -224,9 +226,9 @@ RUN mkdir -p /staging/usr/local /staging/usr/src \
     && analyze-deps.sh /staging /usr/local
 
 FROM builder-php AS collect-fpm
-COPY scripts/build/collect-runtime.sh scripts/build/analyze-deps.sh scripts/build/fix-fpm-config.sh /usr/local/bin/
+COPY scripts/build/collect-runtime.sh scripts/build/analyze-deps.sh scripts/build/fix-fpm-config.sh scripts/build/harden-runtime.sh /usr/local/bin/
 COPY configs/fpm/php-fpm.conf /usr/local/share/gentoo-php/fpm/php-fpm.conf
-RUN chmod +x /usr/local/bin/collect-runtime.sh /usr/local/bin/analyze-deps.sh /usr/local/bin/fix-fpm-config.sh
+RUN chmod +x /usr/local/bin/collect-runtime.sh /usr/local/bin/analyze-deps.sh /usr/local/bin/fix-fpm-config.sh /usr/local/bin/harden-runtime.sh
 RUN mkdir -p /staging/usr/local \
     && cp -a /usr/local/. /staging/usr/local/ \
     && collect-runtime.sh /staging /usr/local fpm runtime \
@@ -248,9 +250,26 @@ RUN mkdir -p /staging/usr/local /staging/usr/src \
     && ! grep -Fq 'NONE/' /staging/usr/local/etc/php-fpm.conf
 
 # -----------------------------------------------------------------------------
-# scratch-runtime — shared rootfs skeleton (+ /bin/sh via static busybox)
+# scratch-runtime — hardened production skeleton (no shell, no package manager)
+# scratch-runtime-build — busybox + entrypoint for cli-build / fpm-build only
 # -----------------------------------------------------------------------------
 FROM builder-base AS scratch-runtime
+ARG NONROOT_UID
+ARG NONROOT_GID
+ARG NONROOT_USER
+
+RUN mkdir -p /rootfs/etc /rootfs/tmp /rootfs/var/www/html \
+    && printf '%s:x:%s:%s:%s:/var/www/html:/sbin/nologin\n' \
+        "${NONROOT_USER}" "${NONROOT_UID}" "${NONROOT_GID}" "${NONROOT_USER}" \
+        > /rootfs/etc/passwd \
+    && printf '%s:x:%s:\n' "${NONROOT_USER}" "${NONROOT_GID}" > /rootfs/etc/group \
+    && printf 'hosts: files dns\n' > /rootfs/etc/nsswitch.conf \
+    && chmod 1777 /rootfs/tmp \
+    && chown -R "${NONROOT_UID}:${NONROOT_GID}" /rootfs/var/www/html \
+    && cp -a /etc/ssl /rootfs/etc/ssl \
+    && cp -a /etc/pki /rootfs/etc/pki 2>/dev/null || true
+
+FROM builder-base AS scratch-runtime-build
 ARG NONROOT_UID
 ARG NONROOT_GID
 ARG NONROOT_USER
@@ -259,7 +278,7 @@ ARG PORTAGE_TMPFS_SIZE
 ARG GENTOO_CACHE_ID
 ARG GENTOO_SYNC
 
-RUN mkdir -p /rootfs/etc /rootfs/tmp /rootfs/usr/local/bin /rootfs/var/www/html \
+RUN mkdir -p /rootfs/etc /rootfs/tmp /rootfs/usr/local/bin /rootfs/usr/src /rootfs/var/www/html \
     && printf '%s:x:%s:%s:%s:/var/www/html:/sbin/nologin\n' \
         "${NONROOT_USER}" "${NONROOT_UID}" "${NONROOT_GID}" "${NONROOT_USER}" \
         > /rootfs/etc/passwd \
@@ -307,21 +326,22 @@ LABEL org.opencontainers.image.title="gentoo-php-cli" \
       org.opencontainers.image.version="${PHP_VERSION}" \
       org.opencontainers.image.base.name="scratch"
 
+ENV PHP_INI_DIR=/usr/local/etc/php \
+    PATH=/usr/local/bin:/usr/local/sbin \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    TZ=UTC
+
 COPY --from=scratch-runtime /rootfs/ /
 COPY --from=collect-cli /staging/ /
-
-ENV PHP_INI_DIR=/usr/local/etc/php \
-    PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/bin \
-    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 
 WORKDIR /var/www/html
 USER ${NONROOT_UID}:${NONROOT_GID}
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD ["/usr/local/bin/docker-php-healthcheck", "health"]
+    CMD ["/usr/local/bin/php", "/usr/local/libexec/php/docker-php-healthcheck.php", "health"]
 
-ENTRYPOINT ["/usr/local/bin/docker-php-entrypoint"]
-CMD ["php", "-a"]
+ENTRYPOINT ["/usr/local/bin/php"]
+CMD ["-a"]
 
 # Extension build helper — NOT for production deploy; use multi-stage + docker-php-export-runtime
 FROM scratch AS cli-build
@@ -332,7 +352,7 @@ LABEL org.opencontainers.image.title="gentoo-php-cli-build" \
       org.opencontainers.image.base.name="scratch" \
       org.opencontainers.image.description="Multi-stage build helper — install extensions, export to minimal cli"
 
-COPY --from=scratch-runtime /rootfs/ /
+COPY --from=scratch-runtime-build /rootfs/ /
 COPY --from=collect-cli-build /staging/ /
 
 ENV PHP_INI_DIR=/usr/local/etc/php \
@@ -357,12 +377,13 @@ LABEL org.opencontainers.image.title="gentoo-php-fpm" \
       org.opencontainers.image.version="${PHP_VERSION}" \
       org.opencontainers.image.base.name="scratch"
 
+ENV PHP_INI_DIR=/usr/local/etc/php \
+    PATH=/usr/local/bin:/usr/local/sbin \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    TZ=UTC
+
 COPY --from=scratch-runtime /rootfs/ /
 COPY --from=collect-fpm /staging/ /
-
-ENV PHP_INI_DIR=/usr/local/etc/php \
-    PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/bin \
-    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 
 WORKDIR /var/www/html
 EXPOSE 9000
@@ -377,10 +398,10 @@ ENV FPM_PING_PATH=/fpm-ping \
 STOPSIGNAL SIGQUIT
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD ["/usr/local/bin/docker-php-healthcheck", "health"]
+    CMD ["/usr/local/bin/php", "/usr/local/libexec/php/docker-php-healthcheck.php", "health"]
 
-ENTRYPOINT ["/usr/local/bin/docker-php-entrypoint"]
-CMD ["php-fpm"]
+ENTRYPOINT ["/usr/local/sbin/php-fpm"]
+CMD ["-F"]
 
 FROM scratch AS fpm-build
 ARG PHP_VERSION
@@ -390,7 +411,7 @@ LABEL org.opencontainers.image.title="gentoo-php-fpm-build" \
       org.opencontainers.image.base.name="scratch" \
       org.opencontainers.image.description="Multi-stage build helper — install extensions, export to minimal fpm"
 
-COPY --from=scratch-runtime /rootfs/ /
+COPY --from=scratch-runtime-build /rootfs/ /
 COPY --from=collect-fpm-build /staging/ /
 
 ENV PHP_INI_DIR=/usr/local/etc/php \

@@ -1,6 +1,6 @@
-# FPM on Kubernetes — startup / liveness / readiness probes
+# FPM on Kubernetes — hardened startup / liveness / readiness probes
 #
-# Requires gentoo-php FPM image with docker-php-healthcheck (default in fpm-* tags).
+# Production fpm-* images: no /bin/sh — probes use php or php-fpm directly.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -20,6 +20,8 @@ spec:
         runAsUser: 82
         runAsGroup: 82
         fsGroup: 82
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: php-fpm
           image: ghcr.io/lemric/gentoo-php/php:fpm-8.5.8
@@ -34,18 +36,24 @@ spec:
               drop: ["ALL"]
           startupProbe:
             exec:
-              command: ["/usr/local/bin/docker-php-healthcheck", "startup"]
+              command: ["/usr/local/sbin/php-fpm", "-t"]
             periodSeconds: 5
             failureThreshold: 30
           livenessProbe:
             exec:
-              command: ["/usr/local/bin/docker-php-healthcheck", "liveness"]
+              command:
+                - /usr/local/bin/php
+                - /usr/local/libexec/php/docker-php-healthcheck.php
+                - liveness
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
           readinessProbe:
             exec:
-              command: ["/usr/local/bin/docker-php-healthcheck", "readiness"]
+              command:
+                - /usr/local/bin/php
+                - /usr/local/libexec/php/docker-php-healthcheck.php
+                - readiness
             periodSeconds: 5
             timeoutSeconds: 5
             failureThreshold: 3

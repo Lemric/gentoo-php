@@ -165,49 +165,35 @@ Official `php-fpm` starts as root, drops to `www-data`. We run `USER 82:82` from
 - `opcache.enable=1`, `validate_timestamps=0`, JIT `1255` / 128M buffer
 - `realpath_cache_size=4096K`
 - `daemonize = no`, logs to `/proc/self/fd/2`
-- `HEALTHCHECK`: `docker-php-healthcheck health`
-- FPM probes: startup (`php-fpm -t`), liveness (PID/port), readiness (FastCGI ping)
+- `HEALTHCHECK`: `php docker-php-healthcheck.php health`
+- FPM probes: startup (`php-fpm -t`), liveness/readiness (PHP script)
+- Pool: `security.limit_extensions = .php`, `open_basedir`, `allow_url_* = off`
 
 ### collect-cli / collect-fpm (runtime-builder)
 
-**What:** BFS over `ldd` dependencies, copy `.so` + dynamic linker, strip, prune build artifacts.
+**What:** BFS over `ldd` dependencies, copy `.so` + dynamic linker, strip, **`harden-runtime.sh`**.
 
-**Pruned from runtime:**
-- phpize, pie, pear, php-config, docker-php-*, install-lib
+**Pruned from production runtime:**
+- `/bin/sh`, busybox, docker-php-entrypoint
+- phpize, pie, docker-php-*, install-lib, install stack
 - headers, pkgconfig, static archives, man pages, docs
-- CLI: php-fpm binary and config
-- FPM: phpdbg
+- setuid/setgid bits, world-writable paths (except `/tmp`)
 
-**Why `ldd` not manual package list:**
-| Aspect | Impact |
-|--------|--------|
-| Security | Only proven-needed libraries enter scratch |
-| Performance | Neutral |
-| Size | Minimal closure — adapts automatically when extensions added |
-| docker-library parity | Official Debian images ship full distro; we optimize for scratch |
+### scratch-runtime (production)
 
-**analyze-deps.sh:** Reports RELRO, PIE, stack canary, duplicate `.so` basenames — build-time audit only.
+**Included:** passwd/group (UID 82), nsswitch.conf, CA certificates, `/tmp` (1777).
 
-### scratch-runtime
+**Excluded:** shell, entrypoint script, tzdata (use `TZ=UTC` env), package manager, compiler.
 
-**Included:** passwd/group (www-data UID/GID 82), nsswitch.conf, CA certificates, optional tzdata, static busybox (`/bin/sh`), upstream `docker-php-entrypoint`.
+### scratch-runtime-build
 
-**Excluded:** bash, package manager, compiler, locale, man, cache.
+Busybox `/bin/sh` + `docker-php-entrypoint` — **only** for `cli-build` / `fpm-build` multi-stage helpers.
 
-**Why static busybox for `/bin/sh`:**
-| Aspect | Impact |
-|--------|--------|
-| Security | Minimal shell — no apt/emerge/gcc; busybox applets only via symlinks |
-| Performance | Neutral |
-| Size | ~1 MB static binary — acceptable for docker-library parity |
-| docker-library parity | Official images expose `/bin/sh`; enables `docker run … sh -c '…'` |
+### cli / fpm (production)
 
-**Why UID/GID 82:**
-Matches official `www-data` on Debian-based PHP images — drop-in K8s compatibility.
+**What:** `FROM scratch` — hardened skeleton + minimal PHP runtime.
 
-### cli / fpm
-
-**What:** `FROM scratch` — copy scratch-runtime + collected staging.
+**Entrypoint:** direct `php` / `php-fpm` exec (no shell wrapper).
 
 **Kubernetes posture:**
 ```yaml
@@ -311,9 +297,11 @@ docker buildx bake -f docker-bake.hcl all
 | NX/ASLR | Kernel + PIE (runtime) |
 | CET | `USE=cet` where CPU supports |
 | Non-root | USER 82:82 always |
-| Minimal shell | Static busybox `/bin/sh` only (no bash) |
-| Read-only FS | Designed for K8s readOnlyRootFilesystem |
-| SBOM | BuildKit attestation |
+| No shell (prod) | `harden-runtime.sh` — zero `/bin/sh`, busybox, setuid |
+| PHP lockdown | `hardening-production.ini` — disable_functions, no URL includes |
+| FPM pool | `security.limit_extensions`, `open_basedir` |
+| Read-only FS | K8s `readOnlyRootFilesystem` + `/tmp` emptyDir |
+| Verification | `verify-hardening.sh` fail-closed in CI |
 
 ---
 
@@ -323,7 +311,8 @@ docker buildx bake -f docker-bake.hcl all
 |------|----------|----------------|
 | Base OS | Debian slim | scratch |
 | Root user | FPM starts root | Always nonroot |
-| Shell | `/bin/sh` (dash) | `/bin/sh` (static busybox) |
+| Shell | `/bin/sh` (dash) | **none** in cli/fpm; busybox only in `*-build` |
+| Entrypoint | shell wrapper | direct `php` / `php-fpm` |
 | Compiler flags | `-O2` | `-O3` + ThinLTO |
 | phpdbg | CLI only | CLI builder only, stripped from runtime |
 | pear/pecl in runtime | Present | SDK only (PIE, not PECL) |

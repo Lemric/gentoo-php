@@ -283,6 +283,13 @@ fi
 
 if [ "${MODE}" = "runtime" ]; then
     purge_runtime_install_artifacts
+    if [ -x /usr/local/bin/harden-runtime.sh ]; then
+        /usr/local/bin/harden-runtime.sh "${STAGING}" "${PREFIX}"
+    fi
+fi
+
+if [ "${MODE}" = "build" ]; then
+    rm -f "${STAGING}${PREFIX}/etc/php/conf.d/hardening-production.ini" 2>/dev/null || true
 fi
 
 verify_staging_openssl

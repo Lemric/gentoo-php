@@ -30,7 +30,7 @@ WORKDIR /var/www/html
 USER ${NONROOT_UID}:${NONROOT_GID}
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["/usr/local/bin/docker-php-entrypoint", "php", "-r", "if (!extension_loaded('gd')) exit(1);"]
+    CMD ["/usr/local/bin/php", "-r", "if (!extension_loaded('gd')) exit(1);"]
 
-ENTRYPOINT ["/usr/local/bin/docker-php-entrypoint"]
-CMD ["php", "-a"]
+ENTRYPOINT ["/usr/local/bin/php"]
+CMD ["-a"]
