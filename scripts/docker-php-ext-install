@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# docker-php-ext-install [-j N] <nazwa1> [<nazwa2> ...]
+#
+# Dokladny odpowiednik oficjalnego docker-php-ext-install: dla kazdego
+# podanego rozszerzenia - jesli nie bylo wczesniej recznie skonfigurowane
+# przez docker-php-ext-configure, robi domyslne phpize+./configure bez
+# dodatkowych flag - potem make, make install, i wlacza rozszerzenie
+# (docker-php-ext-enable).
+
+set -euo pipefail
+
+PHP_SRC_DIR="${PHP_SRC_DIR:-/usr/src/php-src}"
+JOBS="1"
+
+while getopts "j:" opt; do
+    case "${opt}" in
+        j) JOBS="${OPTARG}" ;;
+        *) ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+if [ "$#" -lt 1 ]; then
+    echo "Uzycie: docker-php-ext-install [-j N] <nazwa1> [<nazwa2> ...]" >&2
+    exit 1
+fi
+
+docker-php-source extract
+
+for EXT_NAME in "$@"; do
+    EXT_DIR="${PHP_SRC_DIR}/ext/${EXT_NAME}"
+
+    if [ ! -d "${EXT_DIR}" ]; then
+        echo "docker-php-ext-install: brak ext/${EXT_NAME} w drzewie zrodel PHP" >&2
+        exit 1
+    fi
+
+    cd "${EXT_DIR}"
+
+    if [ ! -f Makefile ]; then
+        echo ">>> ${EXT_NAME}: brak wczesniejszej konfiguracji, domyslne phpize+configure"
+        phpize
+        ./configure
+    fi
+
+    echo ">>> ${EXT_NAME}: make -j${JOBS}"
+    make -j"${JOBS}"
+
+    echo ">>> ${EXT_NAME}: make install"
+    make install
+
+    docker-php-ext-enable "${EXT_NAME}"
+done

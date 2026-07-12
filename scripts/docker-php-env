@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# docker-php-env — export PHP build flags (docker-library/php compatible)
+#
+# Usage: eval "$(docker-php-env)"
+# Or:    source /usr/local/bin/docker-php-env-export
+
+set -euo pipefail
+
+ARCH="$(uname -m)"
+MARCH_FLAGS=""
+case "${ARCH}" in
+	x86_64) MARCH_FLAGS="-march=x86-64-v3 -mtune=generic" ;;
+	aarch64) MARCH_FLAGS="-march=armv8.2-a -mtune=generic" ;;
+esac
+
+cat <<EOF
+export PHP_CFLAGS="-fstack-protector-strong -fpic -fpie -O3 -flto=auto -fno-plt -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 -fstack-clash-protection -D_FORTIFY_SOURCE=3 ${MARCH_FLAGS}"
+export PHP_CPPFLAGS="\${PHP_CFLAGS}"
+export PHP_LDFLAGS="-Wl,-O1 -pie -Wl,-z,relro -Wl,-z,now -Wl,--as-needed -flto=auto -fuse-linker-plugin"
+export PHP_BUILD_PROVIDER="\${PHP_BUILD_PROVIDER:-https://github.com/gentoo-php/gentoo-php}"
+export PHP_UNAME="\${PHP_UNAME:-Linux - Gentoo Docker}"
+EOF

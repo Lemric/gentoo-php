@@ -1,0 +1,11 @@
+# PHP build dependencies — shared libraries for runtime ldd closure
+dev-libs/libxml2 -static-libs
+dev-libs/oniguruma -static-libs
+dev-libs/libsodium -static-libs
+app-crypt/argon2 -static-libs
+dev-libs/openssl -static-libs
+sys-libs/zlib -static-libs
+sys-libs/readline -static-libs
+dev-libs/libedit -static-libs
+dev-db/sqlite -static-libs
+net-misc/curl -static-libs

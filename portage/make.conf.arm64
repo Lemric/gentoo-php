@@ -1,0 +1,3 @@
+# arm64 — accept keywords only
+# -march tuning applies ONLY to PHP via docker-php-env (not global emerge/gcc bootstrap)
+ACCEPT_KEYWORDS="arm64"

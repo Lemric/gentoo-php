@@ -1,0 +1,3 @@
+# Toolchain deps — stable emerge; LTO/march only for PHP (docker-php-env)
+sys-libs/glibc stack-clash-protection
+dev-libs/openssl -bindist

@@ -1,0 +1,13 @@
+# PHP configure/build runtime libraries (shared by unified builder-php)
+dev-libs/libxml2
+dev-libs/oniguruma
+dev-libs/libsodium
+app-crypt/argon2
+dev-libs/openssl
+sys-libs/zlib
+sys-libs/readline
+dev-libs/libedit
+dev-db/sqlite
+net-misc/curl
+app-misc/ca-certificates
+sys-libs/timezone-data

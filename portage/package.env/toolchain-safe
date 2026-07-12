@@ -1,0 +1,4 @@
+# Map toolchain atoms → conservative flags env file (see toolchain-safe-flags)
+sys-devel/gcc toolchain-safe-flags
+sys-devel/binutils toolchain-safe-flags
+sys-libs/glibc toolchain-safe-flags

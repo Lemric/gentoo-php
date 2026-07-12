@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# docker-php-ext-configure <nazwa_rozszerzenia> [dodatkowe flagi configure...]
+#
+# Dokladny odpowiednik oficjalnego docker-php-ext-configure: wypakowuje
+# zrodla (jesli jeszcze nie sa), wchodzi do ext/<nazwa>, uruchamia phpize,
+# potem ./configure z podanymi flagami. Uzywane gdy rozszerzenie wymaga
+# niestandardowej konfiguracji (np. gd --with-freetype --with-jpeg).
+#
+# Przyklad (identyczny jak w oficjalnej dokumentacji, tylko baza to Gentoo):
+#   emerge --verbose media-libs/gd media-libs/freetype media-libs/libjpeg-turbo
+#   docker-php-ext-configure gd --with-freetype --with-jpeg
+#   docker-php-ext-install -j$(nproc) gd
+#   docker-php-ext-enable gd
+
+set -euo pipefail
+
+PHP_SRC_DIR="${PHP_SRC_DIR:-/usr/src/php-src}"
+
+if [ "$#" -lt 1 ]; then
+    echo "Uzycie: docker-php-ext-configure <nazwa> [flagi configure...]" >&2
+    exit 1
+fi
+
+EXT_NAME="$1"; shift
+EXT_DIR="${PHP_SRC_DIR}/ext/${EXT_NAME}"
+
+docker-php-source extract
+
+if [ ! -d "${EXT_DIR}" ]; then
+    echo "docker-php-ext-configure: brak ext/${EXT_NAME} w drzewie zrodel PHP" >&2
+    exit 1
+fi
+
+cd "${EXT_DIR}"
+phpize
+./configure "$@"
+
+echo "docker-php-ext-configure: ${EXT_NAME} skonfigurowane (${*:-brak dodatkowych flag})"

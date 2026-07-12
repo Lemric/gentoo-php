@@ -1,0 +1,15 @@
+# BuildKit — 32 CPU / 128 GiB RAM build host (gentoo-php)
+# Installed on server: /etc/buildkit/buildkitd.toml
+debug = false
+
+[worker.oci]
+  enabled = true
+  platforms = ["linux/amd64", "linux/arm64"]
+  max-parallelism = 32
+  gc = true
+  reservedSpace = 21474836480
+  maxUsedSpace = 128849018880
+  minFreeSpace = 32212254720
+
+[worker.containerd]
+  enabled = false

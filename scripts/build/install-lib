@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# install-lib — optional runtime library installer for extension-builder stages
+#
+# Maps docker-library/php apt package names to Gentoo emerge atoms.
+# Interface mirrors user expectation:
+#   RUN install-lib libjpeg libpng freetype
+#   RUN docker-php-ext-configure gd --with-freetype --with-jpeg
+#   RUN docker-php-ext-install gd
+#
+# Security: only available in builder/SDK images, never in scratch runtime.
+
+set -euo pipefail
+
+declare -A LIB_MAP=(
+    [libjpeg]="media-libs/libjpeg-turbo"
+    [libjpeg-turbo]="media-libs/libjpeg-turbo"
+    [libpng]="media-libs/libpng"
+    [libwebp]="media-libs/libwebp"
+    [freetype]="media-libs/freetype"
+    [libfreetype6-dev]="media-libs/freetype"
+    [libjpeg62-turbo-dev]="media-libs/libjpeg-turbo"
+    [libpng-dev]="media-libs/libpng"
+    [icu]="dev-libs/icu"
+    [libicu-dev]="dev-libs/icu"
+    [libzip]="dev-libs/libzip"
+    [libzip-dev]="dev-libs/libzip"
+    [libpq]="dev-db/postgresql"
+    [libpq-dev]="dev-db/postgresql"
+    [libxml2]="dev-libs/libxml2"
+    [libxml2-dev]="dev-libs/libxml2"
+    [libxslt]="dev-libs/libxslt"
+    [libxslt-dev]="dev-libs/libxslt"
+    [gmp]="dev-libs/gmp"
+    [libgmp-dev]="dev-libs/gmp"
+    [libmemcached]="net-misc/libmemcached"
+    [libmemcached-dev]="net-misc/libmemcached"
+    [librdkafka]="dev-libs/librdkafka"
+    [librdkafka-dev]="dev-libs/librdkafka"
+    [libmagickwand-dev]="media-gfx/imagemagick"
+    [imagemagick]="media-gfx/imagemagick"
+    [libgrpc-dev]="net-libs/grpc"
+    [protobuf]="dev-libs/protobuf"
+    [libprotobuf-dev]="dev-libs/protobuf"
+    [libssl-dev]="dev-libs/openssl"
+    [libcurl4-openssl-dev]="net-misc/curl"
+    [libonig-dev]="dev-libs/oniguruma"
+    [libsodium-dev]="dev-libs/libsodium"
+    [libsqlite3-dev]="dev-db/sqlite"
+    [zlib1g-dev]="sys-libs/zlib"
+    [libreadline-dev]="sys-libs/readline"
+    [libargon2-dev]="app-crypt/argon2"
+    [libevent-dev]="dev-libs/libevent"
+    [libuv-dev]="dev-libs/libuv"
+    [libbrotli-dev]="app-arch/brotli"
+    [libldap2-dev]="net-nds/openldap"
+)
+
+if [ "$#" -lt 1 ]; then
+    echo "Usage: install-lib <name> [<name> ...]" >&2
+    echo "Example: install-lib libjpeg libpng freetype" >&2
+    exit 1
+fi
+
+PACKAGES=()
+for name in "$@"; do
+    atom="${LIB_MAP[$name]:-}"
+    if [ -z "${atom}" ]; then
+        echo "install-lib: unknown library '${name}'" >&2
+        echo "Known aliases: ${!LIB_MAP[*]}" >&2
+        exit 1
+    fi
+    PACKAGES+=("${atom}")
+done
+
+# Deduplicate
+mapfile -t UNIQUE < <(printf '%s\n' "${PACKAGES[@]}" | sort -u)
+echo ">>> install-lib: emerge ${UNIQUE[*]}"
+emerge --verbose --noreplace "${UNIQUE[@]}"

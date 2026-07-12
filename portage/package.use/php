@@ -1,0 +1,3 @@
+# PHP is built from upstream source tarball (docker-library/php model).
+# These USE flags apply only if emerging dev-lang/php in SDK context.
+# LTO/march flags for source build: scripts/docker-php-env

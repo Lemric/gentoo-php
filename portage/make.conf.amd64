@@ -1,0 +1,4 @@
+# amd64 — 64-bit only (stage3:nomultilib has no working x86 32-bit toolchain)
+# -march tuning applies ONLY to PHP via docker-php-env (not global emerge/gcc bootstrap)
+ABI_X86="64"
+ACCEPT_KEYWORDS="amd64"

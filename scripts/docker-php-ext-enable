@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# docker-php-ext-enable <nazwa1> [<nazwa2> ...]
+#
+# Dopisuje wpis 'extension=<nazwa>.so' (albo 'zend_extension=' dla rozszerzen
+# typu Zend, np. opcache) do $PHP_INI_DIR/conf.d/docker-php-ext-<nazwa>.ini.
+# Rozszerzenie musi juz byc skompilowane i zainstalowane w extension_dir
+# (czyli po docker-php-ext-install, albo recznie skopiowane .so).
+
+set -euo pipefail
+
+if [ "$#" -lt 1 ]; then
+    echo "Uzycie: docker-php-ext-enable <nazwa1> [<nazwa2> ...]" >&2
+    exit 1
+fi
+
+PHP_INI_DIR="${PHP_INI_DIR:-/usr/local/etc/php}"
+EXT_DIR="$(php-config --extension-dir 2>/dev/null || true)"
+
+if [ -z "${EXT_DIR}" ] || [ ! -d "${EXT_DIR}" ]; then
+    echo "docker-php-ext-enable: nie moge ustalic extension_dir (php-config dziala?)" >&2
+    exit 1
+fi
+
+mkdir -p "${PHP_INI_DIR}/conf.d"
+
+# Rozszerzenia typu Zend (ladowane inaczej, przed reszta) - lista znanych
+# przypadkow. Wiekszosc rozszerzen to zwykle 'extension='.
+ZEND_EXTENSIONS="opcache xdebug"
+
+for EXT_NAME in "$@"; do
+    SO_FILE="${EXT_DIR}/${EXT_NAME}.so"
+
+    if [ ! -f "${SO_FILE}" ]; then
+        echo "docker-php-ext-enable: brak ${SO_FILE} - najpierw docker-php-ext-install ${EXT_NAME}" >&2
+        exit 1
+    fi
+
+    INI_FILE="${PHP_INI_DIR}/conf.d/docker-php-ext-${EXT_NAME}.ini"
+
+    if echo " ${ZEND_EXTENSIONS} " | grep -q " ${EXT_NAME} "; then
+        echo "zend_extension=${EXT_NAME}.so" > "${INI_FILE}"
+    else
+        echo "extension=${EXT_NAME}.so" > "${INI_FILE}"
+    fi
+
+    echo "docker-php-ext-enable: ${EXT_NAME} -> ${INI_FILE}"
+done

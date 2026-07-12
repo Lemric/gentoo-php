@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+# Upstream: https://github.com/docker-library/php/blob/master/8.5/alpine3.24/cli/docker-php-entrypoint
+
+# first arg is `-f` or `--some-option`
+if [ "${1#-}" != "$1" ]; then
+	set -- php "$@"
+fi
+
+exec "$@"

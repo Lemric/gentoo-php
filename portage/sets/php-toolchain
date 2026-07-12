@@ -1,0 +1,18 @@
+# PHP build toolchain — Gentoo atoms (2024+ dev-build category)
+# Install: emerge --verbose @php-toolchain
+#
+# sys-devel/gcc and sys-devel/binutils come from stage3 — do NOT rebuild in Docker
+# (global -march / @world flags break gcc bootstrap; stage3 compiler is sufficient).
+dev-build/autoconf
+dev-build/automake
+dev-build/libtool
+dev-build/make
+sys-devel/bison
+sys-devel/flex
+dev-util/re2c
+dev-util/pkgconf
+dev-util/ccache
+sys-apps/file
+app-arch/xz-utils
+app-crypt/gnupg
+net-misc/curl

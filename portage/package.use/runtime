@@ -1,0 +1,6 @@
+# Static busybox → /bin/sh in final cli/fpm scratch images (docker-library parity)
+# REQUIRED_USE: pam? (!static) — PAM and static are mutually exclusive
+# static busybox pulls in virtual/libcrypt[static-libs]
+sys-apps/busybox static -pam
+virtual/libcrypt static-libs
+sys-libs/libxcrypt static-libs

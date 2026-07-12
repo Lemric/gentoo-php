@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# docker-php-source - zarzadzanie wyekstrahowanym drzewem zrodel PHP,
+# potrzebnym do budowania dodatkowych rozszerzen przez phpize (dokladnie
+# ten sam cel co w oficjalnym obrazie: trzymac zrodla skompresowane, zeby
+# nie napuchac warstwy, i wypakowywac je tylko na czas kompilacji).
+#
+# Uzycie:
+#   docker-php-source extract
+#   docker-php-source delete
+#
+# Wymaga zmiennych srodowiskowych (ustawianych w Dockerfile):
+#   PHP_SRC_TARBALL   - sciezka do skompresowanego archiwum zrodel (.tar.xz)
+#   PHP_SRC_DIR        - docelowy katalog wypakowania (domyslnie /usr/src/php-src)
+
+set -euo pipefail
+
+PHP_SRC_TARBALL="${PHP_SRC_TARBALL:-/usr/src/php.tar.xz}"
+PHP_SRC_DIR="${PHP_SRC_DIR:-/usr/src/php-src}"
+
+case "${1:-}" in
+    extract)
+        if [ -d "${PHP_SRC_DIR}" ] && [ -n "$(ls -A "${PHP_SRC_DIR}" 2>/dev/null)" ]; then
+            echo "docker-php-source: '${PHP_SRC_DIR}' juz wypakowane, pomijam" >&2
+            exit 0
+        fi
+        if [ ! -f "${PHP_SRC_TARBALL}" ]; then
+            echo "docker-php-source: brak archiwum '${PHP_SRC_TARBALL}'" >&2
+            exit 1
+        fi
+        mkdir -p "${PHP_SRC_DIR}"
+        tar -xf "${PHP_SRC_TARBALL}" -C "${PHP_SRC_DIR}" --strip-components=1
+        echo "docker-php-source: wypakowano do ${PHP_SRC_DIR}"
+        ;;
+    delete)
+        rm -rf "${PHP_SRC_DIR}"
+        echo "docker-php-source: usunieto ${PHP_SRC_DIR}"
+        ;;
+    *)
+        echo "Uzycie: docker-php-source extract|delete" >&2
+        exit 1
+        ;;
+esac
