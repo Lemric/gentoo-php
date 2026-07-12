@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# docker-php-pie-install — install PHP extensions via PIE (https://github.com/php/pie)
+#
+# Replaces deprecated PECL. docker-php-pecl-install is a symlink to this script.
+#
+# Usage (as root during docker build):
+#   install-lib librdkafka          # optional runtime deps
+#   docker-php-pie-install redis
+
+set -euo pipefail
+
+# shellcheck source=/dev/null
+. /usr/local/bin/docker-php-install-env.sh
+
+PIE_BIN="${PIE_BIN:-/usr/local/bin/pie}"
+MAP_FILE="${PIE_PACKAGE_MAP:-/usr/local/share/gentoo-php/pie-package-map}"
+
+PIE_FLAGS=(
+	--no-cache
+	--auto-install-build-tools
+	--auto-install-system-dependencies
+)
+
+usage() {
+	echo "Usage: docker-php-pie-install <extension> [<extension> ...]" >&2
+	exit 1
+}
+
+[ "$#" -ge 1 ] || usage
+
+if [ "$(id -u)" -ne 0 ]; then
+	echo "docker-php-pie-install: must run as root (e.g. Dockerfile RUN)" >&2
+	exit 1
+fi
+
+if [ ! -x "${PIE_BIN}" ]; then
+	echo "docker-php-pie-install: PIE not found at ${PIE_BIN}" >&2
+	exit 1
+fi
+
+lookup_map() {
+	local name="$1"
+	local line key val
+	[ -f "${MAP_FILE}" ] || return 1
+	while IFS= read -r line || [ -n "${line}" ]; do
+		line="${line%%#*}"
+		line="${line#"${line%%[![:space:]]*}"}"
+		[ -n "${line}" ] || continue
+		key="${line%%=*}"
+		val="${line#*=}"
+		if [ "${key}" = "${name}" ]; then
+			echo "${val}"
+			return 0
+		fi
+	done < "${MAP_FILE}"
+	return 1
+}
+
+resolve_package() {
+	local arg="$1"
+	if [[ "${arg}" == */* ]]; then
+		echo "${arg}"
+		return
+	fi
+	if mapped="$(lookup_map "${arg}")"; then
+		echo "${mapped}"
+		return
+	fi
+	echo "${arg}/${arg}"
+}
+
+for pkg in "$@"; do
+	pie_pkg="$(resolve_package "${pkg}")"
+	echo ">>> pie install ${pie_pkg} (requested: ${pkg})"
+	"${PIE_BIN}" install "${PIE_FLAGS[@]}" "${pie_pkg}"
+done
+
+/usr/local/bin/docker-php-install-cleanup

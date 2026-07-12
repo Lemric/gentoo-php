@@ -1,0 +1,116 @@
+#!/bin/sh
+# docker-php-healthcheck — startup / liveness / readiness probes (Docker + Kubernetes)
+#
+# Usage:
+#   docker-php-healthcheck              # combined (Docker HEALTHCHECK default)
+#   docker-php-healthcheck startup      # initial boot / startupProbe
+#   docker-php-healthcheck liveness     # process alive / livenessProbe
+#   docker-php-healthcheck readiness    # ready for traffic / readinessProbe
+#
+# FPM env (optional):
+#   FPM_PING_PATH=/fpm-ping  FPM_PING_RESPONSE=pong
+#   FPM_PID_FILE=/tmp/php-fpm.pid
+#   FPM_HEALTH_HOST=127.0.0.1  FPM_HEALTH_PORT=9000
+set -e
+
+MODE="${1:-health}"
+
+FPM_PING_PATH="${FPM_PING_PATH:-/fpm-ping}"
+FPM_PING_RESPONSE="${FPM_PING_RESPONSE:-pong}"
+FPM_PID_FILE="${FPM_PID_FILE:-/tmp/php-fpm.pid}"
+FPM_HEALTH_HOST="${FPM_HEALTH_HOST:-127.0.0.1}"
+FPM_HEALTH_PORT="${FPM_HEALTH_PORT:-9000}"
+FPM_PING_SCRIPT="${FPM_PING_SCRIPT:-/usr/local/libexec/php/fpm-ping.php}"
+
+is_fpm() {
+	[ -x /usr/local/sbin/php-fpm ]
+}
+
+fpm_startup() {
+	/usr/local/sbin/php-fpm -t
+}
+
+fpm_liveness() {
+	if [ -f "${FPM_PID_FILE}" ]; then
+		pid="$(cat "${FPM_PID_FILE}")"
+		if kill -0 "${pid}" 2>/dev/null; then
+			exit 0
+		fi
+	fi
+
+	# Master PID missing — fall back to listening socket.
+	php -r "
+		\$errno = 0; \$errstr = '';
+		\$fp = @fsockopen('${FPM_HEALTH_HOST}', (int) '${FPM_HEALTH_PORT}', \$errno, \$errstr, 1.0);
+		if (!\$fp) { fwrite(STDERR, \"liveness: port ${FPM_HEALTH_PORT}: \$errstr (\$errno)\n\"); exit(1); }
+		fclose(\$fp);
+	"
+}
+
+fpm_readiness() {
+	if [ ! -f "${FPM_PING_SCRIPT}" ]; then
+		echo "readiness: missing ${FPM_PING_SCRIPT}" >&2
+		exit 1
+	fi
+	FPM_PING_PATH="${FPM_PING_PATH}" \
+	FPM_PING_RESPONSE="${FPM_PING_RESPONSE}" \
+	FPM_HEALTH_HOST="${FPM_HEALTH_HOST}" \
+	FPM_HEALTH_PORT="${FPM_HEALTH_PORT}" \
+	exec php "${FPM_PING_SCRIPT}"
+}
+
+cli_startup() {
+	php -r 'exit(version_compare(PHP_VERSION, "8.0", ">=") ? 0 : 1);'
+}
+
+cli_liveness() {
+	php -r 'exit(function_exists("posix_getuid") ? 0 : 0);'
+}
+
+cli_readiness() {
+	php -r '
+		$required = ["curl", "mbstring", "openssl", "json"];
+		foreach ($required as $ext) {
+			if (!extension_loaded($ext)) {
+				fwrite(STDERR, "readiness: missing ext $ext\n");
+				exit(1);
+			}
+		}
+		exit(0);
+	'
+}
+
+run_fpm() {
+	case "${MODE}" in
+	startup) fpm_startup ;;
+	liveness) fpm_liveness ;;
+	readiness) fpm_readiness ;;
+	health)
+		fpm_liveness
+		fpm_readiness
+		;;
+	*)
+		echo "unknown probe: ${MODE}" >&2
+		exit 2
+		;;
+	esac
+}
+
+run_cli() {
+	case "${MODE}" in
+	startup) cli_startup ;;
+	liveness) cli_liveness ;;
+	readiness) cli_readiness ;;
+	health) cli_readiness ;;
+	*)
+		echo "unknown probe: ${MODE}" >&2
+		exit 2
+		;;
+	esac
+}
+
+if is_fpm; then
+	run_fpm
+else
+	run_cli
+fi

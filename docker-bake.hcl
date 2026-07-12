@@ -1,7 +1,7 @@
 # docker-bake.hcl — unified build: builder-php compiled ONCE, cli+fpm share layers
 #
-# Public tags (multi-arch, published by CI manifest job): cli-8.5.8, fpm-8.5.8, sdk-8.5.8
-# Per-arch push tags (CI only): cli-8.5.8-amd64, cli-8.5.8-arm64, …
+# Public tags (multi-arch): cli-8.5.8, fpm-8.5.8, cli-build-8.5.8, fpm-build-8.5.8
+# Per-arch push tags (CI only): cli-8.5.8-amd64, …
 #
 # Local:  docker buildx bake -f docker-bake.hcl all --var ARCH=amd64 --load
 # CI:     all-amd64 / all-arm64 groups → manifest job merges into cli-8.5.8
@@ -26,16 +26,19 @@ group "default" {
 }
 
 group "all" {
-  targets = ["cli", "fpm", "extension-sdk"]
+  targets = ["cli", "fpm", "cli-build", "fpm-build"]
 }
 
-# CI: one bake per native arch — builder-php once, then cli + fpm + sdk (arch-suffixed tags)
 group "all-amd64" {
-  targets = ["cli-amd64", "fpm-amd64", "extension-sdk-amd64"]
+  targets = ["cli-amd64", "fpm-amd64", "cli-build-amd64", "fpm-build-amd64"]
 }
 
 group "all-arm64" {
-  targets = ["cli-arm64", "fpm-arm64", "extension-sdk-arm64"]
+  targets = ["cli-arm64", "fpm-arm64", "cli-build-arm64", "fpm-build-arm64"]
+}
+
+group "runtime" {
+  targets = ["cli", "fpm"]
 }
 
 target "_common" {
@@ -60,12 +63,6 @@ target "_common" {
 target "builder-php" {
   inherits = ["_common"]
   target   = "builder-php"
-}
-
-target "extension-sdk" {
-  inherits = ["_common"]
-  target   = "extension-sdk"
-  tags     = ["${REGISTRY}/${IMAGE_NAME}:sdk-${PHP_VERSION}"]
 }
 
 target "cli" {
@@ -105,14 +102,38 @@ target "fpm-arm64" {
   tags      = ["${REGISTRY}/${IMAGE_NAME}:fpm-${PHP_VERSION}-arm64"]
 }
 
-target "extension-sdk-amd64" {
-  inherits  = ["extension-sdk"]
-  platforms = ["linux/amd64"]
-  tags      = ["${REGISTRY}/${IMAGE_NAME}:sdk-${PHP_VERSION}-amd64"]
+target "cli-build" {
+  inherits = ["_common"]
+  target   = "cli-build"
+  tags     = ["${REGISTRY}/${IMAGE_NAME}:cli-build-${PHP_VERSION}"]
 }
 
-target "extension-sdk-arm64" {
-  inherits  = ["extension-sdk"]
+target "fpm-build" {
+  inherits = ["_common"]
+  target   = "fpm-build"
+  tags     = ["${REGISTRY}/${IMAGE_NAME}:fpm-build-${PHP_VERSION}"]
+}
+
+target "cli-build-amd64" {
+  inherits  = ["cli-build"]
+  platforms = ["linux/amd64"]
+  tags      = ["${REGISTRY}/${IMAGE_NAME}:cli-build-${PHP_VERSION}-amd64"]
+}
+
+target "cli-build-arm64" {
+  inherits  = ["cli-build"]
   platforms = ["linux/arm64"]
-  tags      = ["${REGISTRY}/${IMAGE_NAME}:sdk-${PHP_VERSION}-arm64"]
+  tags      = ["${REGISTRY}/${IMAGE_NAME}:cli-build-${PHP_VERSION}-arm64"]
+}
+
+target "fpm-build-amd64" {
+  inherits  = ["fpm-build"]
+  platforms = ["linux/amd64"]
+  tags      = ["${REGISTRY}/${IMAGE_NAME}:fpm-build-${PHP_VERSION}-amd64"]
+}
+
+target "fpm-build-arm64" {
+  inherits  = ["fpm-build"]
+  platforms = ["linux/arm64"]
+  tags      = ["${REGISTRY}/${IMAGE_NAME}:fpm-build-${PHP_VERSION}-arm64"]
 }

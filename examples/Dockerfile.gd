@@ -1,36 +1,30 @@
 # syntax=docker/dockerfile:1.7
 #
-# Extension build example — compile GD in SDK, ship minimal runtime on cli base
+# Extension build example — compile GD in cli-build, ship minimal runtime on cli
 #
 # Prerequisites:
-#   make sdk
+#   make cli cli-build
 #   docker build -f examples/Dockerfile.gd -t my/php:8.5-cli-gd .
 #
-# For production, prefer adding the gd-builder RUN block to docker/Dockerfile
-# in stage builder-php (Option A — recommended).
+# For production without extra extensions, use cli/fpm directly.
+# For extensions baked into base image, prefer stage builder-php in docker/Dockerfile.
 
-ARG SDK_IMAGE=php:8.5.8-sdk
 ARG CLI_IMAGE=ghcr.io/lemric/gentoo-php/php:cli-8.5.8
+ARG CLI_BUILD_IMAGE=ghcr.io/lemric/gentoo-php/php:cli-build-8.5.8
 ARG NONROOT_UID=82
 ARG NONROOT_GID=82
 
-FROM ${SDK_IMAGE} AS gd-builder
+FROM ${CLI_BUILD_IMAGE} AS gd-builder
 
 RUN install-lib libjpeg libpng freetype \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j"$(nproc)" gd \
-    && docker-php-ext-enable gd \
-    && php -m | grep -i gd
-
-# ldd closure for gd.so + deps → minimal overlay on scratch cli
-RUN mkdir -p /staging \
-    && cp -a /usr/local/. /staging/usr/local/ \
-    && collect-runtime.sh /staging /usr/local cli \
-    && analyze-deps.sh /staging /usr/local
+    && php -m | grep -i gd \
+    && docker-php-export-runtime /export
 
 FROM ${CLI_IMAGE}
 
-COPY --from=gd-builder /staging/ /
+COPY --from=gd-builder /export/ /
 
 WORKDIR /var/www/html
 USER ${NONROOT_UID}:${NONROOT_GID}

@@ -52,10 +52,10 @@ docker images --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}' | grep -E "cl
 step "4/8  Smoke tests"
 docker run --rm "${IMG_CLI}" php -v
 docker run --rm --entrypoint "${ENTRYPOINT}" "${IMG_FPM}" php-fpm -v
-docker run --rm --entrypoint "${ENTRYPOINT}" "${IMG_FPM}" php-fpm -t
+docker run --rm --entrypoint "${ENTRYPOINT}" "${IMG_FPM}" /usr/local/bin/docker-php-healthcheck startup
 
 step "5/8  Base extensions + nonroot"
-docker run --rm "${IMG_CLI}" php -r 'echo "PHP " . PHP_VERSION . PHP_EOL;'
+docker run --rm "${IMG_CLI}" php -r 'echo OPENSSL_VERSION_TEXT, PHP_EOL;'
 for ext in curl mbstring openssl pdo_sqlite sqlite3 sodium ftp; do
     docker run --rm "${IMG_CLI}" php -m | grep -qi "^${ext}$" && echo "  [OK] ${ext}" || echo "  [MISS] ${ext}"
 done

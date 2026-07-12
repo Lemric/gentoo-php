@@ -4,11 +4,11 @@ Production-grade PHP 8.5 container images built on Gentoo Hardened, delivered as
 
 ## Design Priorities
 
-1. **Security** — hardened toolchain, non-root, minimal attack surface (no package manager / compiler in runtime)
+1. **Security** — hardened toolchain, non-root runtime, mandatory post-install cleanup (OWASP)
 2. **Size** — only `ldd`-resolved runtime artifacts in final image
 3. **Performance** — `-O3`, ThinLTO, `-march` tuning via Gentoo `make.conf`
 4. **Compatibility** — `docker-php-ext-*` interface identical to official images
-5. **Extensibility** — optional libraries via `install-lib`, Extension SDK image
+5. **Extensibility** — `cli-build` / `fpm-build` helpers + `docker-php-export-runtime` for zero-bloat multi-stage
 
 ---
 
@@ -22,12 +22,17 @@ flowchart TD
     D --> E[builder-php]
     E --> G[collect-cli]
     E --> H[collect-fpm]
+    E --> G2[collect-cli-build]
+    E --> H2[collect-fpm-build]
     B --> I[scratch-runtime]
     G --> J[cli]
     H --> K[fpm]
+    G2 --> J2[cli-build]
+    H2 --> K2[fpm-build]
     I --> J
     I --> K
-    E --> L[extension-sdk]
+    I --> J2
+    I --> K2
 ```
 
 Each stage has exactly one responsibility. Intermediate stages are cacheable via BuildKit and GitHub Actions `cache-to: type=gha`.
@@ -76,7 +81,9 @@ Each stage has exactly one responsibility. Intermediate stages are cacheable via
 
 **What:** GPG-verified PHP tarball, minimal `-dev` dependencies matching official base image.
 
-**Dependencies included:** libxml2, oniguruma, libsodium, argon2, openssl, zlib, readline, libedit, sqlite, curl.
+**Dependencies included:** libxml2, oniguruma, libsodium, argon2, **openssl (libssl/libcrypto)**, zlib, readline, libedit, sqlite, curl.
+
+OpenSSL is explicitly copied into scratch (`install_openssl_runtime`) and excluded from `strip` — required for `ext-openssl`, curl, and HTTPS tooling (PIE/Packagist).
 
 **Dependencies excluded:** gd, icu, libzip, postgres, gmp — user installs via `install-lib` + `docker-php-ext-install`.
 
@@ -158,14 +165,15 @@ Official `php-fpm` starts as root, drops to `www-data`. We run `USER 82:82` from
 - `opcache.enable=1`, `validate_timestamps=0`, JIT `1255` / 128M buffer
 - `realpath_cache_size=4096K`
 - `daemonize = no`, logs to `/proc/self/fd/2`
-- `HEALTHCHECK`: `php-fpm -t`
+- `HEALTHCHECK`: `docker-php-healthcheck health`
+- FPM probes: startup (`php-fpm -t`), liveness (PID/port), readiness (FastCGI ping)
 
 ### collect-cli / collect-fpm (runtime-builder)
 
 **What:** BFS over `ldd` dependencies, copy `.so` + dynamic linker, strip, prune build artifacts.
 
 **Pruned from runtime:**
-- phpize, pecl, pear, php-config, docker-php-*, install-lib
+- phpize, pie, pear, php-config, docker-php-*, install-lib
 - headers, pkgconfig, static archives, man pages, docs
 - CLI: php-fpm binary and config
 - FPM: phpdbg
@@ -216,17 +224,24 @@ securityContext:
 
 ---
 
-## Extension SDK
+## Extension installs (multi-stage)
 
-Target: `extension-sdk` (FROM `builder-php` + PECL).
+Production images **`cli` / `fpm`** contain **only** runtime artifacts (minimal scratch).  
+Build helpers **`cli-build` / `fpm-build`** bundle Portage binpkg + PIE + phpize under `/usr/local/libexec/install`.
 
 **Workflow:**
 ```dockerfile
-FROM ghcr.io/lemric/gentoo-php/php:sdk-8.5.8
-RUN install-lib libjpeg libpng freetype
-RUN docker-php-ext-configure gd --with-freetype --with-jpeg
-RUN docker-php-ext-install -j$(nproc) gd
+FROM ghcr.io/lemric/gentoo-php/php:cli-build-8.5.8 AS ext
+RUN install-lib libjpeg libpng freetype \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install -j$(nproc) gd \
+    && docker-php-export-runtime /export
+
+FROM ghcr.io/lemric/gentoo-php/php:cli-8.5.8
+COPY --from=ext /export/ /
 ```
+
+`docker-php-export-runtime` copies extension `.so`, `conf.d/`, and **ldd closure** for new libs only — install stack never reaches production.
 
 **Supported extension patterns:**
 
@@ -234,13 +249,17 @@ RUN docker-php-ext-install -j$(nproc) gd
 |-----------|-------------|--------|
 | gd | libjpeg libpng freetype | docker-php-ext-* |
 | intl | icu | docker-php-ext-* |
-| redis | — | docker-php-pecl-install redis |
-| swoole | libevent | docker-php-pecl-install swoole |
-| grpc | libgrpc protobuf | docker-php-pecl-install grpc |
-| mongodb | — | docker-php-pecl-install mongodb |
-| xdebug | — | docker-php-pecl-install xdebug |
-| apcu | — | docker-php-pecl-install apcu |
-| rdkafka | librdkafka | docker-php-pecl-install rdkafka |
+| redis | — | `docker-php-pie-install redis` |
+| swoole | libevent | `docker-php-pie-install swoole` |
+| grpc | libgrpc protobuf | `docker-php-pie-install grpc` |
+| mongodb | — | `docker-php-pie-install mongodb` |
+| xdebug | — | `docker-php-pie-install xdebug` |
+| apcu | — | `docker-php-pie-install apcu` |
+| rdkafka | librdkafka | `docker-php-pie-install rdkafka` |
+
+PECL-style names map to Packagist packages via `scripts/build/pie-package-map`.  
+Full names work too: `docker-php-pie-install phpredis/phpredis`.  
+`docker-php-pecl-install` remains a symlink for compatibility.
 
 ---
 
@@ -252,10 +271,12 @@ RUN docker-php-ext-install -j$(nproc) gd
 | `docker-php-ext-configure` | Identical interface |
 | `docker-php-ext-install` | Identical interface |
 | `docker-php-ext-enable` | Identical + zend_extension detection |
-| `docker-php-pecl-install` | Identical interface |
+| `docker-php-pecl-install` | Symlink → `docker-php-pie-install` ([PIE](https://github.com/php/pie)) |
 | `docker-php-env` | Gentoo-hardened flags |
 | `docker-php-entrypoint` | Upstream shell script, identical behavior |
-| `install-lib` | Gentoo-specific; maps apt names → emerge atoms |
+| `install-lib` | Gentoo-specific; emerge --root + merge + cleanup |
+| `docker-php-install-cleanup` | Mandatory hygiene after every install |
+| `docker-php-export-runtime` | Minimal overlay for multi-stage COPY |
 
 Official Dockerfiles work with `apt-get` → replace with `install-lib` / `emerge`.
 
@@ -264,9 +285,8 @@ Official Dockerfiles work with `apt-get` → replace with `install-lib` / `emerg
 ## CI/CD
 
 **GitHub Actions** (`.github/workflows/build.yml`):
-- 2 native jobs (amd64 + arm64): `docker buildx bake all-{arch}` — shared `builder-php`, then cli/fpm/sdk
-- Per-arch push: `cli-8.5.8-amd64`, `cli-8.5.8-arm64`, …
-- Manifest job: `docker buildx imagetools create` → public multi-arch tags `cli-8.5.8`, `fpm-8.5.8`, `sdk-8.5.8`
+- 2 native jobs (amd64 + arm64): `docker buildx bake all-{arch}` — cli, fpm, cli-build, fpm-build
+- Manifest job: public tags `cli-8.5.8`, `fpm-8.5.8`, `cli-build-8.5.8`, `fpm-build-8.5.8`
 - BuildKit GHA cache (scope per arch)
 - Secrets: `PHP_GPG_KEYS`, optional `PHP_SHA256`
 
@@ -306,7 +326,7 @@ docker buildx bake -f docker-bake.hcl all
 | Shell | `/bin/sh` (dash) | `/bin/sh` (static busybox) |
 | Compiler flags | `-O2` | `-O3` + ThinLTO |
 | phpdbg | CLI only | CLI builder only, stripped from runtime |
-| pear/pecl in runtime | Present | Builder/SDK only |
+| pear/pecl in runtime | Present | SDK only (PIE, not PECL) |
 | opcache in base CLI | Not enabled | Not enabled (FPM: production ini) |
 
 All deviations are documented and justified by the priority order.

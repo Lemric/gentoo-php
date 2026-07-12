@@ -55,6 +55,8 @@ printf '%s\n' \
     'catch_workers_output = yes' \
     'decorate_workers_output = no' \
     'request_terminate_timeout = 300s' \
+    'ping.path = /fpm-ping' \
+    'ping.response = pong' \
     >> "${FPM_D}/zz-docker.conf"
 
 if grep -Fq 'NONE/' "${ETC}/php-fpm.conf"; then

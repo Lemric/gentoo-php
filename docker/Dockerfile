@@ -10,9 +10,10 @@
 #
 # Pipeline:
 #   builder-base → toolchain → php-builder → builder-php
-#     ├─ collect-cli  → cli
-#     ├─ collect-fpm  → fpm
-#     └─ extension-sdk
+#     ├─ collect-cli        → cli        (minimal runtime)
+#     ├─ collect-cli-build  → cli-build  (install stack — multi-stage only)
+#     ├─ collect-fpm        → fpm
+#     └─ collect-fpm-build  → fpm-build
 #   scratch-runtime (shared rootfs layer)
 # =============================================================================
 
@@ -33,6 +34,9 @@ ARG PORTAGE_TMPFS_SIZE=34359738368
 ARG GENTOO_CACHE_ID=amd64
 # 1 = force emerge-webrsync on every builder-base rebuild; 0 = sync only if tree missing
 ARG GENTOO_SYNC=0
+
+# Official PIE PHAR — https://github.com/php/pie / ghcr.io/php/pie:bin
+FROM ghcr.io/php/pie:bin AS pie-bin
 
 # -----------------------------------------------------------------------------
 # builder-base
@@ -125,18 +129,31 @@ COPY scripts/docker-php-source /usr/local/bin/docker-php-source
 COPY scripts/docker-php-ext-configure /usr/local/bin/docker-php-ext-configure
 COPY scripts/docker-php-ext-install /usr/local/bin/docker-php-ext-install
 COPY scripts/docker-php-ext-enable /usr/local/bin/docker-php-ext-enable
-COPY scripts/docker-php-pecl-install /usr/local/bin/docker-php-pecl-install
+COPY scripts/docker-php-pie-install /usr/local/bin/docker-php-pie-install
+COPY scripts/build/pie-package-map /usr/local/share/gentoo-php/pie-package-map
 COPY scripts/docker-php-env /usr/local/bin/docker-php-env
 COPY scripts/build/install-lib /usr/local/bin/install-lib
+COPY scripts/build/docker-php-install-env.sh /usr/local/bin/docker-php-install-env.sh
+COPY scripts/build/docker-php-install-cleanup.sh /usr/local/bin/docker-php-install-cleanup.sh
+COPY scripts/build/merge-install-root.sh /usr/local/bin/merge-install-root.sh
+COPY scripts/build/bundle-install-stack.sh /usr/local/bin/bundle-install-stack.sh
+COPY scripts/build/docker-php-export-runtime.sh /usr/local/bin/docker-php-export-runtime.sh
 COPY scripts/build/configure-php.sh /usr/local/bin/configure-php.sh
 COPY scripts/build/fix-fpm-config.sh /usr/local/bin/fix-fpm-config.sh
 COPY configs/fpm/php-fpm.conf /usr/local/share/gentoo-php/fpm/php-fpm.conf
 COPY scripts/build/setup-fpm-config.sh /usr/local/bin/setup-fpm-config.sh
 COPY scripts/build/verify-php-tarball.sh /usr/local/bin/verify-php-tarball.sh
+COPY scripts/health/docker-php-healthcheck /usr/local/bin/docker-php-healthcheck
+COPY scripts/health/fpm-ping.php /usr/local/libexec/php/fpm-ping.php
 RUN chmod +x /usr/local/bin/docker-php-* /usr/local/bin/install-lib \
+              /usr/local/bin/merge-install-root.sh /usr/local/bin/bundle-install-stack.sh \
+              /usr/local/bin/docker-php-install-env.sh /usr/local/bin/docker-php-install-cleanup.sh \
+              /usr/local/bin/docker-php-export-runtime.sh \
               /usr/local/bin/configure-php.sh /usr/local/bin/fix-fpm-config.sh \
-              /usr/local/bin/setup-fpm-config.sh \
-              /usr/local/bin/verify-php-tarball.sh
+              /usr/local/bin/setup-fpm-config.sh /usr/local/bin/docker-php-healthcheck \
+              /usr/local/bin/verify-php-tarball.sh \
+    && ln -sf docker-php-pie-install /usr/local/bin/docker-php-pecl-install \
+    && mkdir -p /usr/local/libexec/php /usr/local/share/gentoo-php
 
 WORKDIR /usr/src
 
@@ -163,6 +180,15 @@ ARG BUILD_JOBS
 ARG GENTOO_CACHE_ID
 ENV BUILD_JOBS=${BUILD_JOBS}
 
+COPY --from=pie-bin /pie /usr/local/bin/pie
+RUN --mount=type=cache,target=/var/cache/distfiles,id=gentoo-distfiles-${GENTOO_CACHE_ID},sharing=locked \
+    --mount=type=cache,target=/var/cache/binhost,id=gentoo-binhost-${GENTOO_CACHE_ID},sharing=locked \
+    --mount=type=cache,target=/var/cache/ccache,id=gentoo-ccache-${GENTOO_CACHE_ID},sharing=locked \
+    mkdir -p /var/cache/binhost \
+    && chmod 755 /usr/local/bin/pie \
+    && emerge --verbose dev-vcs/git app-archives/unzip \
+    && pie -V
+
 # Optional extensions — uncomment once:
 # RUN install-lib libjpeg libpng freetype \
 #     && docker-php-ext-configure gd --with-freetype --with-jpeg \
@@ -177,28 +203,24 @@ COPY configs/php/conf.d/opcache-production.ini /usr/local/etc/php/conf.d/
 COPY configs/php/conf.d/docker-fpm.ini /usr/local/etc/php/conf.d/
 
 # -----------------------------------------------------------------------------
-# extension-sdk — same unified build, optional PECL
-# -----------------------------------------------------------------------------
-FROM builder-php AS extension-sdk
-ARG GENTOO_CACHE_ID
-RUN --mount=type=cache,target=/var/cache/distfiles,id=gentoo-distfiles-${GENTOO_CACHE_ID},sharing=locked \
-    --mount=type=cache,target=/var/cache/binhost,id=gentoo-binhost-${GENTOO_CACHE_ID},sharing=locked \
-    --mount=type=cache,target=/var/cache/ccache,id=gentoo-ccache-${GENTOO_CACHE_ID},sharing=locked \
-    mkdir -p /var/cache/binhost \
-    emerge --verbose dev-php/pecl 2>/dev/null \
-    || emerge --verbose app-archives/pecl-php 2>/dev/null \
-    || true
-
-# -----------------------------------------------------------------------------
-# collect-cli / collect-fpm — ONLY divergence point (prune, no recompile)
-# Both fork from builder-php; BuildKit runs them in parallel after builder-php.
+# collect-* — runtime (minimal) vs *-build (install stack for multi-stage Dockerfiles)
 # -----------------------------------------------------------------------------
 FROM builder-php AS collect-cli
 COPY scripts/build/collect-runtime.sh scripts/build/analyze-deps.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/collect-runtime.sh /usr/local/bin/analyze-deps.sh
 RUN mkdir -p /staging/usr/local \
     && cp -a /usr/local/. /staging/usr/local/ \
-    && collect-runtime.sh /staging /usr/local cli \
+    && collect-runtime.sh /staging /usr/local cli runtime \
+    && analyze-deps.sh /staging /usr/local
+
+FROM builder-php AS collect-cli-build
+COPY scripts/build/collect-runtime.sh scripts/build/analyze-deps.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/collect-runtime.sh /usr/local/bin/analyze-deps.sh
+RUN mkdir -p /staging/usr/local /staging/usr/src \
+    && cp -a /usr/local/. /staging/usr/local/ \
+    && cp -a /usr/src/php.tar.xz /staging/usr/src/php.tar.xz \
+    && bundle-install-stack.sh /staging/usr/local/libexec/install \
+    && collect-runtime.sh /staging /usr/local cli build \
     && analyze-deps.sh /staging /usr/local
 
 FROM builder-php AS collect-fpm
@@ -207,7 +229,20 @@ COPY configs/fpm/php-fpm.conf /usr/local/share/gentoo-php/fpm/php-fpm.conf
 RUN chmod +x /usr/local/bin/collect-runtime.sh /usr/local/bin/analyze-deps.sh /usr/local/bin/fix-fpm-config.sh
 RUN mkdir -p /staging/usr/local \
     && cp -a /usr/local/. /staging/usr/local/ \
-    && collect-runtime.sh /staging /usr/local fpm \
+    && collect-runtime.sh /staging /usr/local fpm runtime \
+    && analyze-deps.sh /staging /usr/local \
+    && /usr/local/bin/fix-fpm-config.sh /staging/usr/local \
+    && ! grep -Fq 'NONE/' /staging/usr/local/etc/php-fpm.conf
+
+FROM builder-php AS collect-fpm-build
+COPY scripts/build/collect-runtime.sh scripts/build/analyze-deps.sh scripts/build/fix-fpm-config.sh /usr/local/bin/
+COPY configs/fpm/php-fpm.conf /usr/local/share/gentoo-php/fpm/php-fpm.conf
+RUN chmod +x /usr/local/bin/collect-runtime.sh /usr/local/bin/analyze-deps.sh /usr/local/bin/fix-fpm-config.sh
+RUN mkdir -p /staging/usr/local /staging/usr/src \
+    && cp -a /usr/local/. /staging/usr/local/ \
+    && cp -a /usr/src/php.tar.xz /staging/usr/src/php.tar.xz \
+    && bundle-install-stack.sh /staging/usr/local/libexec/install \
+    && collect-runtime.sh /staging /usr/local fpm build \
     && analyze-deps.sh /staging /usr/local \
     && /usr/local/bin/fix-fpm-config.sh /staging/usr/local \
     && ! grep -Fq 'NONE/' /staging/usr/local/etc/php-fpm.conf
@@ -282,8 +317,33 @@ ENV PHP_INI_DIR=/usr/local/etc/php \
 WORKDIR /var/www/html
 USER ${NONROOT_UID}:${NONROOT_GID}
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["/usr/local/bin/docker-php-entrypoint", "php", "-r", "exit(0);"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD ["/usr/local/bin/docker-php-healthcheck", "health"]
+
+ENTRYPOINT ["/usr/local/bin/docker-php-entrypoint"]
+CMD ["php", "-a"]
+
+# Extension build helper — NOT for production deploy; use multi-stage + docker-php-export-runtime
+FROM scratch AS cli-build
+ARG PHP_VERSION
+
+LABEL org.opencontainers.image.title="gentoo-php-cli-build" \
+      org.opencontainers.image.version="${PHP_VERSION}" \
+      org.opencontainers.image.base.name="scratch" \
+      org.opencontainers.image.description="Multi-stage build helper — install extensions, export to minimal cli"
+
+COPY --from=scratch-runtime /rootfs/ /
+COPY --from=collect-cli-build /staging/ /
+
+ENV PHP_INI_DIR=/usr/local/etc/php \
+    PHP_SRC_TARBALL=/usr/src/php.tar.xz \
+    PHP_SRC_DIR=/usr/src/php \
+    INSTALL_ROOT=/usr/local/libexec/install \
+    PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/bin \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+
+WORKDIR /var/www/html
+USER root
 
 ENTRYPOINT ["/usr/local/bin/docker-php-entrypoint"]
 CMD ["php", "-a"]
@@ -308,10 +368,49 @@ WORKDIR /var/www/html
 EXPOSE 9000
 USER ${NONROOT_UID}:${NONROOT_GID}
 
+ENV FPM_PING_PATH=/fpm-ping \
+    FPM_PING_RESPONSE=pong \
+    FPM_PID_FILE=/tmp/php-fpm.pid \
+    FPM_HEALTH_HOST=127.0.0.1 \
+    FPM_HEALTH_PORT=9000
+
 STOPSIGNAL SIGQUIT
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD ["/usr/local/bin/docker-php-entrypoint", "php-fpm", "-t"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD ["/usr/local/bin/docker-php-healthcheck", "health"]
+
+ENTRYPOINT ["/usr/local/bin/docker-php-entrypoint"]
+CMD ["php-fpm"]
+
+FROM scratch AS fpm-build
+ARG PHP_VERSION
+
+LABEL org.opencontainers.image.title="gentoo-php-fpm-build" \
+      org.opencontainers.image.version="${PHP_VERSION}" \
+      org.opencontainers.image.base.name="scratch" \
+      org.opencontainers.image.description="Multi-stage build helper — install extensions, export to minimal fpm"
+
+COPY --from=scratch-runtime /rootfs/ /
+COPY --from=collect-fpm-build /staging/ /
+
+ENV PHP_INI_DIR=/usr/local/etc/php \
+    PHP_SRC_TARBALL=/usr/src/php.tar.xz \
+    PHP_SRC_DIR=/usr/src/php \
+    INSTALL_ROOT=/usr/local/libexec/install \
+    PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/bin \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+
+WORKDIR /var/www/html
+EXPOSE 9000
+USER root
+
+ENV FPM_PING_PATH=/fpm-ping \
+    FPM_PING_RESPONSE=pong \
+    FPM_PID_FILE=/tmp/php-fpm.pid \
+    FPM_HEALTH_HOST=127.0.0.1 \
+    FPM_HEALTH_PORT=9000
+
+STOPSIGNAL SIGQUIT
 
 ENTRYPOINT ["/usr/local/bin/docker-php-entrypoint"]
 CMD ["php-fpm"]

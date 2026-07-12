@@ -40,16 +40,17 @@ DOCKER_BUILD := DOCKER_BUILDKIT=1 $(DOCKER) buildx build \
 	--platform $(PLATFORM) \
 	--load
 
-.PHONY: help all cli fpm sdk verify clean bake-all cli-fast fpm-fast all-fast setup-builder setup-cache-dirs
+.PHONY: help all cli fpm cli-build fpm-build verify clean bake-all cli-fast fpm-fast all-fast setup-builder setup-cache-dirs
 .PHONY: builder-base toolchain php-builder builder-php collect-cli collect-fpm scratch-runtime
 
 help:
 	@echo "Gentoo PHP $(PHP_VERSION) — unified scratch image build"
 	@echo ""
 	@echo "  make all          Build cli + fpm (bake, shared builder-php)"
-	@echo "  make cli          Build cli scratch image"
-	@echo "  make fpm          Build fpm scratch image"
-	@echo "  make sdk          Extension SDK image"
+	@echo "  make cli          Build cli scratch image (minimal runtime)"
+	@echo "  make fpm          Build fpm scratch image (minimal runtime)"
+	@echo "  make cli-build    Build cli extension helper (multi-stage only)"
+	@echo "  make fpm-build    Build fpm extension helper (multi-stage only)"
 	@echo "  make verify       Full test suite"
 	@echo ""
 	@echo "Variables:"
@@ -140,15 +141,23 @@ fpm: _check_keys _check_arch
 		-t $(IMAGE_NAME):fpm-$(PHP_VERSION) \
 		.
 
-sdk: _check_keys _check_arch
-	$(DOCKER_BUILD) -f $(DOCKERFILE) --target extension-sdk \
+cli-build: _check_keys _check_arch
+	$(DOCKER_BUILD) -f $(DOCKERFILE) --target cli-build \
 		--build-arg PHP_VERSION=$(PHP_VERSION) \
 		--build-arg PHP_GPG_KEYS="$(PHP_GPG_KEYS)" \
 		$(PARALLEL_ARGS) \
-		-t $(IMAGE_NAME):sdk-$(PHP_VERSION) \
+		-t $(IMAGE_NAME):cli-build-$(PHP_VERSION) \
 		.
 
-builder-base toolchain php-builder builder-php extension-sdk collect-cli collect-fpm scratch-runtime: _check_arch
+fpm-build: _check_keys _check_arch
+	$(DOCKER_BUILD) -f $(DOCKERFILE) --target fpm-build \
+		--build-arg PHP_VERSION=$(PHP_VERSION) \
+		--build-arg PHP_GPG_KEYS="$(PHP_GPG_KEYS)" \
+		$(PARALLEL_ARGS) \
+		-t $(IMAGE_NAME):fpm-build-$(PHP_VERSION) \
+		.
+
+builder-base toolchain php-builder builder-php collect-cli collect-cli-build collect-fpm collect-fpm-build scratch-runtime: _check_arch
 	$(DOCKER_BUILD) -f $(DOCKERFILE) --target $@ \
 		--build-arg PHP_VERSION=$(PHP_VERSION) \
 		--build-arg PHP_GPG_KEYS="$(PHP_GPG_KEYS)" \
@@ -163,5 +172,4 @@ clean:
 	-docker rmi \
 		$(IMAGE_NAME):cli-$(PHP_VERSION) \
 		$(IMAGE_NAME):fpm-$(PHP_VERSION) \
-		$(IMAGE_NAME):sdk-$(PHP_VERSION) \
 		2>/dev/null

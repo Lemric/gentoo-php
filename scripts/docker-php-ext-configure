@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-PHP_SRC_DIR="${PHP_SRC_DIR:-/usr/src/php-src}"
+PHP_SRC_DIR="${PHP_SRC_DIR:-/usr/src/php}"
 
 if [ "$#" -lt 1 ]; then
     echo "Uzycie: docker-php-ext-configure <nazwa> [flagi configure...]" >&2

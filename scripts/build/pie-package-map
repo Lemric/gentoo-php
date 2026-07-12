@@ -1,0 +1,27 @@
+# PECL short name → Packagist package for PIE (https://github.com/php/pie)
+# Format: pecl_name=vendor/package
+# Full vendor/package arguments pass through unchanged.
+redis=phpredis/phpredis
+xdebug=xdebug/xdebug
+apcu=apcu/apcu
+mongodb=mongodb/mongodb
+swoole=swoole/swoole
+grpc=grpc/grpc
+rdkafka=arnaud-lb/php-rdkafka
+igbinary=igbinary/igbinary
+memcached=php-memcached-dev/php-memcached
+msgpack=msgpack/msgpack
+yaml=php/pecl-yaml
+uuid=php/pecl-uuid
+imagick=imagick/imagick
+amqp=php-amqp/php-amqp
+event=event/event
+ev=php/pecl-ev
+ds=php-ds/php-ds
+ast=nikic/php-ast
+uopz=uopz/uopz
+zstd=php/pecl-zstd
+lz4=php/pecl-lz4
+inotify=inotify/inotify
+protobuf=google/protobuf
+opentelemetry=open-telemetry/opentelemetry

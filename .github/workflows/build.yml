@@ -12,7 +12,6 @@ env:
   REGISTRY: ghcr.io/lemric/gentoo-php
   IMAGE_NAME: php
   PHP_VERSION: '8.5.8'
-  # GHA runners (7–16 GB RAM): avoid 32G Portage tmpfs from docker-builder defaults
   PORTAGE_TMPFS_SIZE: '4294967296'
 
 jobs:
@@ -27,7 +26,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # One job per native arch: builder-php once, then cli + fpm + sdk
           - arch: amd64
             runner: ubuntu-24.04
             bake_group: all-amd64
@@ -50,7 +48,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Bake cli + fpm + sdk (shared builder-php graph)
+      - name: Bake runtime + build helpers (shared builder-php graph)
         id: bake
         env:
           PHP_GPG_KEYS: ${{ secrets.PHP_GPG_KEYS }}
@@ -90,7 +88,7 @@ jobs:
             --var "PHP_GPG_KEYS=${PHP_GPG_KEYS}"
             --var "PHP_SHA256=${PHP_SHA256}"
           )
-          for target in cli fpm extension-sdk; do
+          for target in cli fpm cli-build; do
             docker buildx bake -f docker-bake.hcl "${target}" --load "${common[@]}"
           done
 
@@ -106,7 +104,7 @@ jobs:
             for img in \
               "${repo}:cli-${ver}${suffix}" \
               "${repo}:fpm-${ver}${suffix}" \
-              "${repo}:sdk-${ver}${suffix}"; do
+              "${repo}:cli-build-${ver}${suffix}"; do
               docker pull "$img"
             done
           else
@@ -114,11 +112,14 @@ jobs:
           fi
           cli="${repo}:cli-${ver}${suffix}"
           fpm="${repo}:fpm-${ver}${suffix}"
-          sdk="${repo}:sdk-${ver}${suffix}"
+          build="${repo}:cli-build-${ver}${suffix}"
           docker run --rm "$cli" php -v
           docker run --rm "$cli" php -r 'exit(posix_getuid() === 0 ? 1 : 0);'
-          docker run --rm "$fpm" php-fpm -t
-          docker run --rm "$sdk" php -v
+          docker run --rm "$cli" test ! -x /usr/local/bin/pie
+          docker run --rm "$cli" test ! -x /usr/local/bin/phpize
+          docker run --rm "$build" test -x /usr/local/bin/pie
+          docker run --rm "$build" test -x /usr/local/bin/phpize
+          docker run --rm "$fpm" /usr/local/bin/docker-php-healthcheck startup
 
   manifest:
     name: publish multi-arch manifests
@@ -145,7 +146,7 @@ jobs:
           set -euo pipefail
           repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
           ver="${{ env.PHP_VERSION }}"
-          for variant in cli fpm sdk; do
+          for variant in cli fpm cli-build fpm-build; do
             for arch in amd64 arm64; do
               docker buildx imagetools inspect "${repo}:${variant}-${ver}-${arch}"
             done
@@ -156,7 +157,7 @@ jobs:
           set -euo pipefail
           repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
           ver="${{ env.PHP_VERSION }}"
-          for variant in cli fpm sdk; do
+          for variant in cli fpm cli-build fpm-build; do
             docker buildx imagetools create \
               -t "${repo}:${variant}-${ver}" \
               "${repo}:${variant}-${ver}-amd64" \
@@ -168,7 +169,7 @@ jobs:
           set -euo pipefail
           repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
           ver="${{ env.PHP_VERSION }}"
-          for variant in cli fpm sdk; do
+          for variant in cli fpm cli-build fpm-build; do
             for arch in amd64 arm64; do
               docker buildx imagetools rm "${repo}:${variant}-${ver}-${arch}" || true
             done
@@ -182,15 +183,15 @@ jobs:
           for img in \
             "${repo}:cli-${ver}" \
             "${repo}:fpm-${ver}" \
-            "${repo}:sdk-${ver}"; do
+            "${repo}:cli-build-${ver}"; do
             docker pull "$img"
           done
           docker run --rm "${repo}:cli-${ver}" php -v
-          docker run --rm "${repo}:cli-${ver}" php -r 'exit(posix_getuid() === 0 ? 1 : 0);'
+          docker run --rm "${repo}:cli-${ver}" test ! -x /usr/local/bin/pie
+          docker run --rm "${repo}:cli-build-${ver}" test -x /usr/local/bin/pie
           docker run --rm "${repo}:fpm-${ver}" php-fpm -t
-          docker run --rm "${repo}:sdk-${ver}" php -v
 
           echo "Multi-arch manifests:"
-          for variant in cli fpm sdk; do
+          for variant in cli fpm cli-build fpm-build; do
             docker buildx imagetools inspect "${repo}:${variant}-${ver}"
           done

@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-PHP_SRC_DIR="${PHP_SRC_DIR:-/usr/src/php-src}"
+PHP_SRC_DIR="${PHP_SRC_DIR:-/usr/src/php}"
 JOBS="1"
 
 while getopts "j:" opt; do
@@ -51,3 +51,5 @@ for EXT_NAME in "$@"; do
 
     docker-php-ext-enable "${EXT_NAME}"
 done
+
+/usr/local/bin/docker-php-install-cleanup

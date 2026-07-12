@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
-# install-lib — optional runtime library installer for extension-builder stages
+# install-lib — runtime library installer (cli/fpm, binpkg via bundled Portage)
 #
-# Maps docker-library/php apt package names to Gentoo emerge atoms.
-# Interface mirrors user expectation:
-#   RUN install-lib libjpeg libpng freetype
-#   RUN docker-php-ext-configure gd --with-freetype --with-jpeg
-#   RUN docker-php-ext-install gd
+# Maps docker-library/php apt names to Gentoo atoms, merges .so into /,
+# then runs mandatory docker-php-install-cleanup.
 #
-# Security: only available in builder/SDK images, never in scratch runtime.
+# Usage (as root during docker build):
+#   install-lib libjpeg libpng freetype
+#   docker-php-ext-configure gd --with-freetype --with-jpeg
+#   docker-php-ext-install -j$(nproc) gd
 
 set -euo pipefail
+
+# shellcheck source=/dev/null
+. /usr/local/bin/docker-php-install-env.sh
 
 declare -A LIB_MAP=(
     [libjpeg]="media-libs/libjpeg-turbo"
@@ -57,7 +60,16 @@ declare -A LIB_MAP=(
 
 if [ "$#" -lt 1 ]; then
     echo "Usage: install-lib <name> [<name> ...]" >&2
-    echo "Example: install-lib libjpeg libpng freetype" >&2
+    exit 1
+fi
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "install-lib: must run as root (e.g. Dockerfile RUN)" >&2
+    exit 1
+fi
+
+if [ ! -x "${INSTALL_ROOT}/usr/bin/emerge" ] && ! command -v emerge >/dev/null 2>&1; then
+    echo "install-lib: bundled Portage missing (${INSTALL_ROOT})" >&2
     exit 1
 fi
 
@@ -66,13 +78,16 @@ for name in "$@"; do
     atom="${LIB_MAP[$name]:-}"
     if [ -z "${atom}" ]; then
         echo "install-lib: unknown library '${name}'" >&2
-        echo "Known aliases: ${!LIB_MAP[*]}" >&2
         exit 1
     fi
     PACKAGES+=("${atom}")
 done
 
-# Deduplicate
 mapfile -t UNIQUE < <(printf '%s\n' "${PACKAGES[@]}" | sort -u)
-echo ">>> install-lib: emerge ${UNIQUE[*]}"
-emerge --verbose --noreplace "${UNIQUE[@]}"
+EPHEMERAL="$(mktemp -d /tmp/install-lib.XXXXXX)"
+trap 'rm -rf "${EPHEMERAL}"' EXIT
+
+echo ">>> install-lib: emerge --root ${EPHEMERAL} ${UNIQUE[*]}"
+emerge --root "${EPHEMERAL}" --usepkgonly --getbinpkg-only --verbose --noreplace "${UNIQUE[@]}"
+/usr/local/bin/merge-install-root.sh "${EPHEMERAL}" /
+/usr/local/bin/docker-php-install-cleanup --keep-source

@@ -37,7 +37,7 @@ make all          # zalecane: bake cli + fpm (ARCH=amd64 domyślnie)
 make verify
 docker buildx bake -f docker-bake.hcl all              # amd64
 docker buildx bake -f docker-bake.hcl all --set ARCH=arm64
-# CI: bake per arch → manifest job łączy w cli-8.5.8 / fpm-8.5.8 / sdk-8.5.8
+# CI: bake per arch → manifest job łączy w cli-8.5.8 / fpm-8.5.8
 ```
 
 ## Architektura
@@ -53,9 +53,10 @@ Szczegóły: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 | Target | Tag | Opis |
 |--------|-----|------|
-| `cli` | `php:cli-8.5.8` | PHP CLI, scratch, UID 82 |
-| `fpm` | `php:fpm-8.5.8` | PHP-FPM, scratch, UID 82 |
-| `extension-sdk` | `php:sdk-8.5.8` | Budowanie rozszerzeń (phpize, pecl) |
+| `cli` | `php:cli-8.5.8` | **Produkcja** — minimalny scratch runtime, UID 82 |
+| `fpm` | `php:fpm-8.5.8` | **Produkcja** — minimalny FPM scratch, UID 82 |
+| `cli-build` | `php:cli-build-8.5.8` | Multi-stage helper — PIE, phpize, install-lib (nie deployuj) |
+| `fpm-build` | `php:fpm-build-8.5.8` | Multi-stage helper dla FPM |
 
 ## Zgodność z docker-library/php
 
@@ -65,8 +66,11 @@ Interfejs identyczny:
 - `docker-php-ext-configure`
 - `docker-php-ext-install`
 - `docker-php-ext-enable`
-- `docker-php-pecl-install`
+- `docker-php-pie-install` (alias: `docker-php-pecl-install`)
 - `docker-php-env`
+- `install-lib` (Gentoo atoms via bundled Portage; wymaga `USER root` w RUN)
+- `docker-php-install-cleanup` (automatycznie po każdej instalacji)
+- `docker-php-export-runtime` (eksport overlay do multi-stage)
 - `docker-php-entrypoint` (identyczny skrypt jak w [docker-library/php](https://github.com/docker-library/php/blob/master/8.5/alpine3.24/cli/docker-php-entrypoint))
 
 Bazowy zestaw rozszerzeń odpowiada świeżemu `php:8.5-cli` / `php:8.5-fpm`.
@@ -84,18 +88,30 @@ RUN install-lib libjpeg libpng freetype \
     && docker-php-ext-install -j"$(nproc)" gd
 ```
 
-### Opcja B — downstream Dockerfile
+### Opcja B — downstream Dockerfile (multi-stage, zalecane)
 
-```bash
-make sdk
-```
+**`cli` / `fpm`** = minimalny runtime (bez gcc, emerge, phpize).  
+**`cli-build` / `fpm-build`** = helper do instalacji rozszerzeń — używaj tylko jako stage pośredni.
 
 ```dockerfile
-FROM ghcr.io/lemric/gentoo-php/php:sdk-8.5.8
-RUN install-lib libjpeg libpng freetype
-RUN docker-php-ext-configure gd --with-freetype --with-jpeg
-RUN docker-php-ext-install -j$(nproc) gd
+FROM ghcr.io/lemric/gentoo-php/php:cli-build-8.5.8 AS ext
+
+RUN install-lib libjpeg libpng freetype \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install -j$(nproc) gd \
+    && docker-php-pie-install redis \
+    && docker-php-export-runtime /export
+
+FROM ghcr.io/lemric/gentoo-php/php:cli-8.5.8
+COPY --from=ext /export/ /
+USER www-data
 ```
+
+Finalny obraz = **tylko** runtime + rozszerzenia (ldd closure). Install stack nie trafia do produkcji.
+
+Rozszerzenia spoza core PHP: [PIE](https://github.com/php/pie) (`docker-php-pie-install`).  
+Skróty PECL (`redis`, `xdebug`) mapują się przez [scripts/build/pie-package-map](scripts/build/pie-package-map).  
+`docker-php-pecl-install` to symlink — stary interfejs działa.
 
 Przykład: [examples/Dockerfile.gd](examples/Dockerfile.gd)
 
@@ -113,17 +129,19 @@ Pełna mapa: [scripts/build/install-lib](scripts/build/install-lib)
 
 ## Scratch — co jest w obrazie
 
-**Tylko:**
-- `php` / `php-fpm`
-- wymagane `.so` (ldd closure)
-- CA certificates
-- `/etc/passwd`, `/etc/group`, `nsswitch.conf`
-- opcjonalnie `tzdata`
-- `php.ini` templates + `conf.d/`
-- `/bin/sh` (statyczny busybox) + `docker-php-entrypoint` (skrypt shell)
+### `cli` / `fpm` (produkcja)
 
-**Nigdy:**
-- bash, gcc, emerge, apt, nagłówki, dokumentacja, locale cache
+- `php` / `php-fpm` + ldd closure (OpenSSL, libgcc, …)
+- CA certificates, passwd/group, `/bin/sh` (busybox)
+- `php.ini` + `conf.d/`, healthcheck, entrypoint
+- **Bez:** gcc, emerge, phpize, PIE, nagłówków, install stack
+
+### `cli-build` / `fpm-build` (tylko multi-stage)
+
+- Wszystko z runtime + PIE, phpize, `install-lib`, Portage binpkg w `/usr/local/libexec/install`
+- Po instalacji: `docker-php-export-runtime /export` → skopiuj do minimalnego `cli`/`fpm`
+
+Każdy skrypt instalacji kończy się **obowiązkowym cleanup** (temp, cache, strip `.so`).
 
 ## Bezpieczeństwo
 
@@ -133,8 +151,29 @@ Pełna mapa: [scripts/build/install-lib](scripts/build/install-lib)
 - **ThinLTO** + `-O3` + `-march=x86-64-v3` (amd64)
 - Zawsze **USER 82:82** (www-data)
 - FPM: **SIGQUIT** graceful shutdown
-- **HEALTHCHECK** wbudowany
-- CI: SBOM, provenance, cosign (tagi)
+- **HEALTHCHECK** — `docker-php-healthcheck` (startup / liveness / readiness)
+- CI: BuildKit GHA cache, multi-arch manifests
+
+## Health probes (Docker / Kubernetes)
+
+Wbudowany `/usr/local/bin/docker-php-healthcheck`:
+
+| Probe | FPM | CLI |
+|-------|-----|-----|
+| `startup` | `php-fpm -t` (config) | PHP ≥ 8.0 |
+| `liveness` | PID file lub port `:9000` | PHP runtime |
+| `readiness` | FastCGI **ping** (`/fpm-ping` → `pong`) | core extensions |
+| `health` (domyślny `HEALTHCHECK`) | liveness + readiness | readiness |
+
+```bash
+docker-php-healthcheck startup
+docker-php-healthcheck liveness
+docker-php-healthcheck readiness
+```
+
+FPM pool ma `ping.path = /fpm-ping` i `ping.response = pong` (konfigurowalne przez env).
+
+Przykład Kubernetes: [examples/k8s/fpm-probes.yaml](examples/k8s/fpm-probes.yaml)
 
 ## Kubernetes
 

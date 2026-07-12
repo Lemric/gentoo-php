@@ -14,17 +14,18 @@ make cli          # single target (uses BuildKit cache from prior all)
 | `toolchain` | GCC + all build deps (one emerge) + `docker-php-entrypoint` |
 | `php-builder` | PHP source verify, docker-php-* scripts |
 | `builder-php` | **Single** configure + compile (CLI+FPM+phpdbg superset) |
-| `collect-cli` | ldd closure, strip FPM artifacts |
-| `collect-fpm` | ldd closure, strip phpdbg |
-| `scratch-runtime` | passwd, certs, `/bin/sh` (busybox), entrypoint (shared) |
-| `cli` / `fpm` | FROM scratch final images |
-| `extension-sdk` | builder-php + PECL |
+| `collect-cli` / `collect-fpm` | ldd closure, **runtime** mode (no install stack) |
+| `collect-cli-build` / `collect-fpm-build` | + bundle install stack, **build** mode |
+| `cli` / `fpm` | FROM scratch — **production** minimal runtime |
+| `cli-build` / `fpm-build` | FROM scratch — multi-stage extension helper only |
 
 BuildKit graph after `builder-php`:
 
 ```
-builder-php ─┬─ collect-cli ── cli
-             └─ collect-fpm ── fpm
+builder-php ─┬─ collect-cli ──────── cli
+             ├─ collect-cli-build ─ cli-build
+             ├─ collect-fpm ──────── fpm
+             └─ collect-fpm-build ─ fpm-build
 ```
 
 Both collect stages run in parallel; PHP is never compiled twice.
