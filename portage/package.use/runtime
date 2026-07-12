@@ -1,4 +1,4 @@
-# Static busybox → /bin/sh in cli-build / fpm-build only (not production cli/fpm)
+# Static busybox → /bin/sh in cli + cli-build / fpm-build (not in fpm production)
 # REQUIRED_USE: pam? (!static) — PAM and static are mutually exclusive
 # static busybox pulls in virtual/libcrypt[static-libs]
 sys-apps/busybox static -pam

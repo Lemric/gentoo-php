@@ -14,10 +14,13 @@ make cli          # single target (uses BuildKit cache from prior all)
 | `toolchain` | GCC + all build deps (one emerge) + `docker-php-entrypoint` |
 | `php-builder` | PHP source verify, docker-php-* scripts |
 | `builder-php` | **Single** configure + compile (CLI+FPM+phpdbg superset) |
-| `collect-cli` / `collect-fpm` | ldd closure, **runtime** mode (no install stack) |
-| `collect-cli-build` / `collect-fpm-build` | + bundle install stack, **build** mode |
-| `cli` / `fpm` | FROM scratch — **production** minimal runtime |
-| `cli-build` / `fpm-build` | FROM scratch — multi-stage extension helper only |
+| `collect-cli` / `collect-fpm` | ldd closure, harden-runtime (profile cli/fpm) |
+| `collect-cli-build` / `collect-fpm-build` | + install stack (build mode) |
+| `cli` / `fpm` | FROM scratch production runtime |
+| `cli-build` / `fpm-build` | multi-stage extension helpers |
+| `scratch-runtime` | passwd, CA, `/tmp` — **FPM** skeleton (no shell) |
+| `scratch-runtime-cli` | + static busybox `/bin/sh`, entrypoint — **CLI** only |
+| `scratch-runtime-build` | busybox + entrypoint — `*-build` helpers |
 
 BuildKit graph after `builder-php`:
 

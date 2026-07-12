@@ -54,8 +54,9 @@ docker run --rm "${IMG_CLI}" -v
 docker run --rm "${IMG_FPM}" -v
 docker run --rm "${IMG_FPM}" -t
 
-step "5/9  Health probes (PHP, no shell)"
-docker run --rm "${IMG_CLI}" "${HEALTHCHECK}" health
+step "5/9  Health probes + CLI shell"
+docker run --rm --entrypoint /usr/local/bin/php "${IMG_CLI}" "${HEALTHCHECK}" health
+docker run --rm --entrypoint /bin/sh "${IMG_CLI}" -c 'php -v >/dev/null && echo "  [OK] /bin/sh + php"'
 docker run --rm "${IMG_FPM}" /usr/local/sbin/php-fpm -t
 docker run --rm --entrypoint /usr/local/bin/php "${IMG_FPM}" "${HEALTHCHECK}" readiness
 
@@ -78,10 +79,8 @@ docker rm "${FPM_CID}" >/dev/null
 echo "${FPM_UID}" | grep -qE '^(0|root)$' && fail "FPM master runs as root" || echo "  [OK] FPM UID=${FPM_UID}"
 
 step "8/9  Hardening verification"
-ARCH="${ARCH}" PLATFORM="${PLATFORM}" PHP_VERSION="${PHP_VERSION}" \
-    "${ROOT}/scripts/verify-hardening.sh" "${IMG_CLI}"
-ARCH="${ARCH}" PLATFORM="${PLATFORM}" PHP_VERSION="${PHP_VERSION}" \
-    "${ROOT}/scripts/verify-hardening.sh" "${IMG_FPM}"
+"${ROOT}/scripts/verify-hardening.sh" "${IMG_CLI}" cli
+"${ROOT}/scripts/verify-hardening.sh" "${IMG_FPM}" fpm
 
 step "9/9  Optional security scans"
 if command -v checksec >/dev/null 2>&1; then

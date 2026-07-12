@@ -41,7 +41,7 @@ DOCKER_BUILD := DOCKER_BUILDKIT=1 $(DOCKER) buildx build \
 	--load
 
 .PHONY: help all cli fpm cli-build fpm-build verify clean bake-all cli-fast fpm-fast all-fast setup-builder setup-cache-dirs
-.PHONY: builder-base toolchain php-builder builder-php collect-cli collect-cli-build collect-fpm collect-fpm-build scratch-runtime scratch-runtime-build
+.PHONY: builder-base toolchain php-builder builder-php collect-cli collect-cli-build collect-fpm collect-fpm-build scratch-runtime scratch-runtime-cli scratch-runtime-build
 
 help:
 	@echo "Gentoo PHP $(PHP_VERSION) — unified scratch image build"

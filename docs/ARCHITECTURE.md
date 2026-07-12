@@ -179,21 +179,22 @@ Official `php-fpm` starts as root, drops to `www-data`. We run `USER 82:82` from
 - headers, pkgconfig, static archives, man pages, docs
 - setuid/setgid bits, world-writable paths (except `/tmp`)
 
-### scratch-runtime (production)
+### scratch-runtime-cli
 
-**Included:** passwd/group (UID 82), nsswitch.conf, CA certificates, `/tmp` (1777).
+Static busybox `/bin/sh` + upstream `docker-php-entrypoint` — **CLI production only**.
 
-**Excluded:** shell, entrypoint script, tzdata (use `TZ=UTC` env), package manager, compiler.
+### scratch-runtime (FPM)
+
+No shell — passwd, CA, `/tmp` only.
 
 ### scratch-runtime-build
 
-Busybox `/bin/sh` + `docker-php-entrypoint` — **only** for `cli-build` / `fpm-build` multi-stage helpers.
+Busybox + entrypoint for `cli-build` / `fpm-build` multi-stage helpers.
 
 ### cli / fpm (production)
 
-**What:** `FROM scratch` — hardened skeleton + minimal PHP runtime.
-
-**Entrypoint:** direct `php` / `php-fpm` exec (no shell wrapper).
+**cli:** `scratch-runtime-cli` + minimal PHP — script runners via `/bin/sh`.  
+**fpm:** `scratch-runtime` + minimal PHP — no shell, direct `php-fpm` entrypoint.
 
 **Kubernetes posture:**
 ```yaml
@@ -297,7 +298,7 @@ docker buildx bake -f docker-bake.hcl all
 | NX/ASLR | Kernel + PIE (runtime) |
 | CET | `USE=cet` where CPU supports |
 | Non-root | USER 82:82 always |
-| No shell (prod) | `harden-runtime.sh` — zero `/bin/sh`, busybox, setuid |
+| No shell (fpm) | FPM: zero `/bin/sh`; CLI: static busybox only |
 | PHP lockdown | `hardening-production.ini` — disable_functions, no URL includes |
 | FPM pool | `security.limit_extensions`, `open_basedir` |
 | Read-only FS | K8s `readOnlyRootFilesystem` + `/tmp` emptyDir |

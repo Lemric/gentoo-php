@@ -269,6 +269,45 @@ RUN mkdir -p /rootfs/etc /rootfs/tmp /rootfs/var/www/html \
     && cp -a /etc/ssl /rootfs/etc/ssl \
     && cp -a /etc/pki /rootfs/etc/pki 2>/dev/null || true
 
+# CLI production: static busybox /bin/sh + upstream entrypoint (script runners, docker-library parity).
+# FPM stays on scratch-runtime (no shell).
+FROM builder-base AS scratch-runtime-cli
+ARG NONROOT_UID
+ARG NONROOT_GID
+ARG NONROOT_USER
+ARG PORTAGE_TMPFS_SIZE
+ARG GENTOO_CACHE_ID
+
+RUN mkdir -p /rootfs/etc /rootfs/tmp /rootfs/usr/local/bin /rootfs/var/www/html \
+    && printf '%s:x:%s:%s:%s:/var/www/html:/sbin/nologin\n' \
+        "${NONROOT_USER}" "${NONROOT_UID}" "${NONROOT_GID}" "${NONROOT_USER}" \
+        > /rootfs/etc/passwd \
+    && printf '%s:x:%s:\n' "${NONROOT_USER}" "${NONROOT_GID}" > /rootfs/etc/group \
+    && printf 'hosts: files dns\n' > /rootfs/etc/nsswitch.conf \
+    && chmod 1777 /rootfs/tmp \
+    && chown -R "${NONROOT_UID}:${NONROOT_GID}" /rootfs/var/www/html \
+    && cp -a /etc/ssl /rootfs/etc/ssl \
+    && cp -a /etc/pki /rootfs/etc/pki 2>/dev/null || true
+
+COPY --from=toolchain /usr/local/bin/docker-php-entrypoint /rootfs/usr/local/bin/docker-php-entrypoint
+
+RUN --mount=type=cache,target=/var/cache/distfiles,id=gentoo-distfiles-${GENTOO_CACHE_ID},sharing=locked \
+    --mount=type=cache,target=/var/cache/binhost,id=gentoo-binhost-${GENTOO_CACHE_ID},sharing=locked \
+    --mount=type=cache,target=/var/cache/ccache,id=gentoo-ccache-${GENTOO_CACHE_ID},sharing=locked \
+    --mount=type=tmpfs,target=/var/tmp/portage,size=${PORTAGE_TMPFS_SIZE} \
+    mkdir -p /var/tmp/portage /var/cache/binhost \
+    && export PORTAGE_TMPDIR=/var/tmp/portage \
+    && emerge --verbose sys-apps/busybox \
+    && BB="$(readlink -f "$(command -v busybox)")" \
+    && mkdir -p /rootfs/bin \
+    && cp -L "${BB}" /rootfs/bin/busybox \
+    && strip --strip-all /rootfs/bin/busybox \
+    && ln -sf busybox /rootfs/bin/sh \
+    && file /rootfs/bin/busybox | grep -qi 'statically linked' \
+    && chmod 755 /rootfs/usr/local/bin/docker-php-entrypoint \
+    && head -n1 /rootfs/usr/local/bin/docker-php-entrypoint | grep -q '^#!/bin/sh$' \
+    && /rootfs/bin/sh -c 'echo cli-sh-ok'
+
 FROM builder-base AS scratch-runtime-build
 ARG NONROOT_UID
 ARG NONROOT_GID
@@ -327,11 +366,11 @@ LABEL org.opencontainers.image.title="gentoo-php-cli" \
       org.opencontainers.image.base.name="scratch"
 
 ENV PHP_INI_DIR=/usr/local/etc/php \
-    PATH=/usr/local/bin:/usr/local/sbin \
+    PATH=/usr/local/bin:/usr/local/sbin:/bin \
     SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
     TZ=UTC
 
-COPY --from=scratch-runtime /rootfs/ /
+COPY --from=scratch-runtime-cli /rootfs/ /
 COPY --from=collect-cli /staging/ /
 
 WORKDIR /var/www/html
@@ -340,8 +379,8 @@ USER ${NONROOT_UID}:${NONROOT_GID}
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD ["/usr/local/bin/php", "/usr/local/libexec/php/docker-php-healthcheck.php", "health"]
 
-ENTRYPOINT ["/usr/local/bin/php"]
-CMD ["-a"]
+ENTRYPOINT ["/usr/local/bin/docker-php-entrypoint"]
+CMD ["php", "-a"]
 
 # Extension build helper — NOT for production deploy; use multi-stage + docker-php-export-runtime
 FROM scratch AS cli-build

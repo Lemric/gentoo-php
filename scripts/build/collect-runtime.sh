@@ -284,7 +284,7 @@ fi
 if [ "${MODE}" = "runtime" ]; then
     purge_runtime_install_artifacts
     if [ -x /usr/local/bin/harden-runtime.sh ]; then
-        /usr/local/bin/harden-runtime.sh "${STAGING}" "${PREFIX}"
+        /usr/local/bin/harden-runtime.sh "${STAGING}" "${PREFIX}" "${VARIANT}"
     fi
 fi
 
