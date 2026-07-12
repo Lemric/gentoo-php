@@ -14,10 +14,16 @@ echo ">>> verify-hardening: ${IMAGE} (profile=${PROFILE})"
 if [ "${PROFILE}" = "cli" ]; then
     docker run --rm --entrypoint /bin/sh "${IMAGE}" -c '
         test -x /bin/sh && test -x /bin/busybox || exit 1
+        test -x /usr/bin/env || exit 1
+        test -x /usr/bin/wget || exit 1
+        test -x /usr/bin/php || exit 1
+        test -f /etc/services || exit 1
+        grep -qE "^(http|https)[[:space:]]+[0-9]+" /etc/services
+        /usr/bin/env php -v >/dev/null
+        wget -q -O /dev/null -T 20 https://getcomposer.org/installer
         test -x /usr/local/bin/docker-php-entrypoint || exit 1
-        php -v >/dev/null
-        echo "OK: static /bin/sh + entrypoint + php"
-    ' || fail "CLI shell/entrypoint"
+        echo "OK: /bin/sh + env/wget/php + /etc/services"
+    ' || fail "CLI shell/env/wget/php"
 
     docker run --rm --entrypoint /usr/local/bin/php "${IMAGE}" -r '
         $forbidden = [

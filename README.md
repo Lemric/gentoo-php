@@ -73,7 +73,8 @@ Interfejs identyczny:
 - `docker-php-export-runtime` (eksport overlay do multi-stage)
 - `docker-php-entrypoint` (identyczny skrypt jak w [docker-library/php](https://github.com/docker-library/php/blob/master/8.5/alpine3.24/cli/docker-php-entrypoint))
 
-Bazowy zestaw rozszerzeń odpowiada świeżemu `php:8.5-cli` / `php:8.5-fpm`.
+Bazowy zestaw rozszerzeń odpowiada świeżemu `php:8.5-cli` / `php:8.5-fpm`.  
+Runtime ini (`proc_open`, `putenv`, `allow_url_fopen`, brak `open_basedir`) — **zgodność z docker-library** pod Symfony/Laravel.  
 **Nie ma** gd, intl, zip, pdo_mysql — dokładasz je świadomie.
 
 ## Dokładanie rozszerzeń
@@ -129,18 +130,22 @@ Pełna mapa: [scripts/build/install-lib](scripts/build/install-lib)
 
 ## Scratch — co jest w obrazie
 
-### `cli` (produkcja — hardened + shell)
+### `cli` (produkcja — framework runtime + shell)
 
-- `php` + ldd closure, statyczny **`/bin/sh`** (busybox ~1 MB)
-- `docker-php-entrypoint` — jak w docker-library (`-f` → php, skrypty `#!/bin/sh`)
+- `php` + ldd closure, statyczny **`/bin/sh`** + **`/usr/bin/env`** (busybox)
+- **`/usr/bin/php`** → symlink — shebangi `#!/usr/bin/env php` i `#!/usr/bin/php`
+- `docker-php-entrypoint` — jak w docker-library (`-f` → php)
+- **Composer, artisan, queue** — `proc_open`, `putenv`, `pcntl`, `symlink` dostępne (jak official)
 - **Brak** bash, gcc, emerge, phpize, PIE w runtime
 
 ### `fpm` (produkcja — hardened, bez shella)
 
 - `php-fpm` + ldd closure — **zero** `/bin/sh`
-- `hardening-production.ini` — wyłączone `exec`/`proc_open`/`shell_exec`/…
-- FPM: `security.limit_extensions`, `open_basedir`, `allow_url_* = Off`
+- `hardening-production.ini` — bezpieczne domyślne prod (bez `disable_functions`; zgodność z docker-library)
+- FPM: `security.limit_extensions = .php`, ping `/fpm-ping` — **bez** `open_basedir`
 - Probes: `php /usr/local/libexec/php/docker-php-healthcheck.php`
+
+Opcjonalny extra lockdown (Composer/queue/Process przestaną działać): skopiuj `configs/php/conf.d/hardening-strict.ini` do obrazu aplikacji.
 
 ### `cli-build` / `fpm-build` (tylko multi-stage)
 
@@ -157,7 +162,7 @@ Każdy skrypt instalacji kończy się **obowiązkowym cleanup** (temp, cache, st
 - Produkcja **CLI**: statyczny `/bin/sh` (busybox) — skrypty shell, **FPM**: bez shella
 - **fail-closed** `harden-runtime.sh` + `verify-hardening.sh`
 - Zawsze **USER 82:82** (www-data)
-- FPM: **SIGQUIT**, `security.limit_extensions`, `open_basedir`
+- FPM: **SIGQUIT**, `security.limit_extensions`
 - **HEALTHCHECK** — PHP probes (bez sh)
 - CI: multi-arch manifests, BuildKit cache
 
@@ -173,10 +178,13 @@ Wbudowany `/usr/local/libexec/php/docker-php-healthcheck.php` (PHP, bez shell):
 | `health` | liveness + readiness | readiness |
 
 ```bash
-# Skrypt shell w kontenerze CLI
+# Shebang #!/usr/bin/env php (Symfony, Composer bin, itp.)
+docker run --rm -v "$PWD:/app" -w /app \
+  ghcr.io/lemric/gentoo-php/php:cli-8.5.8 ./bin/console
+
+# Shell interaktywny / skrypt bash
 docker run --rm -it ghcr.io/lemric/gentoo-php/php:cli-8.5.8 /bin/sh
-docker run --rm ghcr.io/lemric/gentoo-php/php:cli-8.5.8 /bin/sh -c 'php artisan migrate'
-docker run --rm ghcr.io/lemric/gentoo-php/php:cli-8.5.8 /bin/sh your-script.sh
+docker run --rm ghcr.io/lemric/gentoo-php/php:cli-8.5.8 /bin/sh deploy.sh
 
 # Healthcheck (exec, bez shella)
 docker run --rm --entrypoint php ghcr.io/lemric/gentoo-php/php:cli-8.5.8 \

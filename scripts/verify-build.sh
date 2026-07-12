@@ -56,12 +56,57 @@ docker run --rm "${IMG_FPM}" -t
 
 step "5/9  Health probes + CLI shell"
 docker run --rm --entrypoint /usr/local/bin/php "${IMG_CLI}" "${HEALTHCHECK}" health
-docker run --rm --entrypoint /bin/sh "${IMG_CLI}" -c 'php -v >/dev/null && echo "  [OK] /bin/sh + php"'
+docker run --rm --entrypoint /bin/sh "${IMG_CLI}" -c '
+    php -v >/dev/null && echo "  [OK] /bin/sh + php"
+    printf "%s\n" "#!/usr/bin/env php" "<?php echo \"env-shebang-ok\\n\";" > /tmp/t.php
+    chmod +x /tmp/t.php && /tmp/t.php | grep -q env-shebang-ok && echo "  [OK] #!/usr/bin/env php"
+'
 docker run --rm "${IMG_FPM}" /usr/local/sbin/php-fpm -t
 docker run --rm --entrypoint /usr/local/bin/php "${IMG_FPM}" "${HEALTHCHECK}" readiness
 
-step "6/9  Base extensions + nonroot"
+step "6/9  Base extensions + HTTPS + framework runtime (CLI/FPM)"
 docker run --rm "${IMG_CLI}" -r 'echo OPENSSL_VERSION_TEXT, PHP_EOL;'
+framework_check='
+function ok($cond, $msg) {
+    if (!$cond) { fwrite(STDERR, "framework: {$msg}\n"); exit(1); }
+}
+ok(ini_get("allow_url_fopen"), "allow_url_fopen");
+ok(!ini_get("allow_url_include"), "allow_url_include off");
+ok(function_exists("proc_open"), "proc_open");
+ok(function_exists("putenv"), "putenv");
+ok(function_exists("symlink"), "symlink");
+ok(function_exists("pcntl_signal"), "pcntl_signal");
+$disabled = array_map("trim", explode(",", (string) ini_get("disable_functions")));
+ok(!in_array("proc_open", $disabled, true), "proc_open not disabled");
+ok(!in_array("putenv", $disabled, true), "putenv not disabled");
+echo "  [OK] framework runtime parity\n";
+'
+docker run --rm "${IMG_CLI}" -r "${framework_check}"
+docker run --rm "${IMG_CLI}" -r '
+    ini_set("display_errors", "stderr");
+    $ca = ini_get("openssl.cafile");
+    if ($ca === "" || !is_readable($ca)) { fwrite(STDERR, "bad openssl.cafile\n"); exit(1); }
+    $ctx = stream_context_create(["ssl" => ["verify_peer" => true, "verify_peer_name" => true]]);
+    $fp = @fopen("https://getcomposer.org/", "r", false, $ctx);
+    if ($fp === false) { fwrite(STDERR, "HTTPS failed\n"); exit(1); }
+    fclose($fp);
+    echo "  [OK] CLI HTTPS (openssl.cafile={$ca})\n";
+'
+docker run --rm --entrypoint /usr/local/bin/php "${IMG_FPM}" -r "${framework_check}"
+docker run --rm --entrypoint /usr/local/bin/php "${IMG_FPM}" -r '
+    ini_set("display_errors", "stderr");
+    if (!ini_get("allow_url_fopen")) { fwrite(STDERR, "FPM allow_url_fopen disabled\n"); exit(1); }
+    if (!extension_loaded("curl")) { fwrite(STDERR, "curl missing\n"); exit(1); }
+    $ca = ini_get("openssl.cafile");
+    if ($ca === "" || !is_readable($ca)) { fwrite(STDERR, "bad openssl.cafile\n"); exit(1); }
+    $ch = curl_init("https://getcomposer.org/");
+    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_NOBODY => true, CURLOPT_TIMEOUT => 20]);
+    curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($code < 200 || $code >= 400) { fwrite(STDERR, "FPM HTTPS curl failed HTTP {$code}\n"); exit(1); }
+    echo "  [OK] FPM HTTPS curl (openssl.cafile={$ca})\n";
+'
 for ext in curl mbstring openssl pdo_sqlite sqlite3 sodium ftp; do
     docker run --rm "${IMG_CLI}" -m | grep -qi "^${ext}$" && echo "  [OK] ${ext}" || echo "  [MISS] ${ext}"
 done

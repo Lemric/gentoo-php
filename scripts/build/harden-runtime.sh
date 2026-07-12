@@ -45,7 +45,7 @@ fi
 
 while IFS= read -r -d '' script; do
     case "${script}" in
-        *"/libexec/php/"*.php)
+        *.php)
             continue
             ;;
     esac

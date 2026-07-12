@@ -125,7 +125,24 @@ verify_staging_openssl() {
             fwrite(STDERR, "OPENSSL_VERSION_TEXT unavailable\n");
             exit(1);
         }
-        echo OPENSSL_VERSION_TEXT, PHP_EOL;
+        $ca = ini_get("openssl.cafile");
+        if ($ca === "" || !is_readable($ca)) {
+            fwrite(STDERR, "openssl.cafile missing or unreadable: {$ca}\n");
+            exit(1);
+        }
+        $ctx = stream_context_create([
+            "ssl" => [
+                "verify_peer" => true,
+                "verify_peer_name" => true,
+            ],
+        ]);
+        $fp = @fopen("https://getcomposer.org/", "r", false, $ctx);
+        if ($fp === false) {
+            fwrite(STDERR, "HTTPS verify failed (openssl.cafile={$ca})\n");
+            exit(1);
+        }
+        fclose($fp);
+        echo OPENSSL_VERSION_TEXT, " CA=", $ca, PHP_EOL;
     '
 }
 

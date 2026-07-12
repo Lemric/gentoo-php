@@ -145,6 +145,7 @@ COPY scripts/build/setup-fpm-config.sh /usr/local/bin/setup-fpm-config.sh
 COPY scripts/build/verify-php-tarball.sh /usr/local/bin/verify-php-tarball.sh
 COPY scripts/health/docker-php-healthcheck.php /usr/local/libexec/php/docker-php-healthcheck.php
 COPY scripts/health/fpm-ping.php /usr/local/libexec/php/fpm-ping.php
+COPY scripts/build/ensure-ca-bundle.sh /usr/local/bin/ensure-ca-bundle.sh
 COPY scripts/build/harden-runtime.sh /usr/local/bin/harden-runtime.sh
 RUN chmod +x /usr/local/bin/docker-php-* /usr/local/bin/install-lib \
               /usr/local/bin/merge-install-root.sh /usr/local/bin/bundle-install-stack.sh \
@@ -152,7 +153,7 @@ RUN chmod +x /usr/local/bin/docker-php-* /usr/local/bin/install-lib \
               /usr/local/bin/docker-php-export-runtime.sh \
               /usr/local/bin/configure-php.sh /usr/local/bin/fix-fpm-config.sh \
               /usr/local/bin/setup-fpm-config.sh /usr/local/bin/verify-php-tarball.sh \
-              /usr/local/bin/harden-runtime.sh \
+              /usr/local/bin/harden-runtime.sh /usr/local/bin/ensure-ca-bundle.sh \
     && ln -sf docker-php-pie-install /usr/local/bin/docker-php-pecl-install \
     && mkdir -p /usr/local/libexec/php /usr/local/share/gentoo-php
 
@@ -187,8 +188,7 @@ RUN --mount=type=cache,target=/var/cache/distfiles,id=gentoo-distfiles-${GENTOO_
     --mount=type=cache,target=/var/cache/ccache,id=gentoo-ccache-${GENTOO_CACHE_ID},sharing=locked \
     mkdir -p /var/cache/binhost \
     && chmod 755 /usr/local/bin/pie \
-    && emerge --verbose dev-vcs/git app-arch/unzip \
-    && pie -V
+    && emerge --verbose dev-vcs/git app-arch/unzip
 
 # Optional extensions — uncomment once:
 # RUN install-lib libjpeg libpng freetype \
@@ -198,11 +198,14 @@ RUN --mount=type=cache,target=/var/cache/distfiles,id=gentoo-distfiles-${GENTOO_
 RUN --mount=type=cache,target=/var/cache/ccache,id=gentoo-ccache-${GENTOO_CACHE_ID},sharing=locked \
     --mount=type=tmpfs,target=/tmp/php-build,size=8589934592 \
     configure-php.sh \
-    && setup-fpm-config.sh
+    && setup-fpm-config.sh \
+    && pie -V
 
 COPY configs/php/conf.d/opcache-production.ini /usr/local/etc/php/conf.d/
 COPY configs/php/conf.d/docker-fpm.ini /usr/local/etc/php/conf.d/
+COPY configs/php/conf.d/ca-bundle.ini /usr/local/etc/php/conf.d/
 COPY configs/php/conf.d/hardening-production.ini /usr/local/etc/php/conf.d/
+COPY configs/php/conf.d/allow-url.ini /usr/local/etc/php/conf.d/
 
 # -----------------------------------------------------------------------------
 # collect-* — runtime (minimal) vs *-build (install stack for multi-stage Dockerfiles)
@@ -258,7 +261,9 @@ ARG NONROOT_UID
 ARG NONROOT_GID
 ARG NONROOT_USER
 
-RUN mkdir -p /rootfs/etc /rootfs/tmp /rootfs/var/www/html \
+COPY scripts/build/ensure-ca-bundle.sh /usr/local/bin/ensure-ca-bundle.sh
+RUN chmod +x /usr/local/bin/ensure-ca-bundle.sh \
+    && mkdir -p /rootfs/etc /rootfs/tmp /rootfs/var/www/html \
     && printf '%s:x:%s:%s:%s:/var/www/html:/sbin/nologin\n' \
         "${NONROOT_USER}" "${NONROOT_UID}" "${NONROOT_GID}" "${NONROOT_USER}" \
         > /rootfs/etc/passwd \
@@ -267,7 +272,10 @@ RUN mkdir -p /rootfs/etc /rootfs/tmp /rootfs/var/www/html \
     && chmod 1777 /rootfs/tmp \
     && chown -R "${NONROOT_UID}:${NONROOT_GID}" /rootfs/var/www/html \
     && cp -a /etc/ssl /rootfs/etc/ssl \
-    && cp -a /etc/pki /rootfs/etc/pki 2>/dev/null || true
+    && cp -a /etc/pki /rootfs/etc/pki 2>/dev/null || true \
+    && cp /etc/services /rootfs/etc/services \
+    && cp /etc/protocols /rootfs/etc/protocols \
+    && ensure-ca-bundle.sh /rootfs
 
 # CLI production: static busybox /bin/sh + upstream entrypoint (script runners, docker-library parity).
 # FPM stays on scratch-runtime (no shell).
@@ -278,7 +286,9 @@ ARG NONROOT_USER
 ARG PORTAGE_TMPFS_SIZE
 ARG GENTOO_CACHE_ID
 
-RUN mkdir -p /rootfs/etc /rootfs/tmp /rootfs/usr/local/bin /rootfs/var/www/html \
+COPY scripts/build/ensure-ca-bundle.sh /usr/local/bin/ensure-ca-bundle.sh
+RUN chmod +x /usr/local/bin/ensure-ca-bundle.sh \
+    && mkdir -p /rootfs/etc /rootfs/tmp /rootfs/usr/local/bin /rootfs/var/www/html \
     && printf '%s:x:%s:%s:%s:/var/www/html:/sbin/nologin\n' \
         "${NONROOT_USER}" "${NONROOT_UID}" "${NONROOT_GID}" "${NONROOT_USER}" \
         > /rootfs/etc/passwd \
@@ -287,7 +297,10 @@ RUN mkdir -p /rootfs/etc /rootfs/tmp /rootfs/usr/local/bin /rootfs/var/www/html 
     && chmod 1777 /rootfs/tmp \
     && chown -R "${NONROOT_UID}:${NONROOT_GID}" /rootfs/var/www/html \
     && cp -a /etc/ssl /rootfs/etc/ssl \
-    && cp -a /etc/pki /rootfs/etc/pki 2>/dev/null || true
+    && cp -a /etc/pki /rootfs/etc/pki 2>/dev/null || true \
+    && cp /etc/services /rootfs/etc/services \
+    && cp /etc/protocols /rootfs/etc/protocols \
+    && ensure-ca-bundle.sh /rootfs
 
 COPY --from=toolchain /usr/local/bin/docker-php-entrypoint /rootfs/usr/local/bin/docker-php-entrypoint
 
@@ -303,10 +316,17 @@ RUN --mount=type=cache,target=/var/cache/distfiles,id=gentoo-distfiles-${GENTOO_
     && cp -L "${BB}" /rootfs/bin/busybox \
     && strip --strip-all /rootfs/bin/busybox \
     && ln -sf busybox /rootfs/bin/sh \
+    && mkdir -p /rootfs/usr/bin \
+    && ln -sf ../../bin/busybox /rootfs/usr/bin/env \
+    && ln -sf ../../bin/busybox /rootfs/usr/bin/wget \
+    && ln -sf ../local/bin/php /rootfs/usr/bin/php \
     && file /rootfs/bin/busybox | grep -qi 'statically linked' \
+    && grep -qE '^(http|https)[[:space:]]+[0-9]+' /rootfs/etc/services \
     && chmod 755 /rootfs/usr/local/bin/docker-php-entrypoint \
     && head -n1 /rootfs/usr/local/bin/docker-php-entrypoint | grep -q '^#!/bin/sh$' \
-    && /rootfs/bin/sh -c 'echo cli-sh-ok'
+    && /rootfs/bin/sh -c '/usr/bin/env php -V >/dev/null && echo cli-sh-ok' \
+    && /rootfs/bin/busybox wget -q -O /dev/null -T 20 https://getcomposer.org/installer \
+    && echo cli-wget-ok
 
 FROM builder-base AS scratch-runtime-build
 ARG NONROOT_UID
@@ -317,7 +337,9 @@ ARG PORTAGE_TMPFS_SIZE
 ARG GENTOO_CACHE_ID
 ARG GENTOO_SYNC
 
-RUN mkdir -p /rootfs/etc /rootfs/tmp /rootfs/usr/local/bin /rootfs/usr/src /rootfs/var/www/html \
+COPY scripts/build/ensure-ca-bundle.sh /usr/local/bin/ensure-ca-bundle.sh
+RUN chmod +x /usr/local/bin/ensure-ca-bundle.sh \
+    && mkdir -p /rootfs/etc /rootfs/tmp /rootfs/usr/local/bin /rootfs/usr/src /rootfs/var/www/html \
     && printf '%s:x:%s:%s:%s:/var/www/html:/sbin/nologin\n' \
         "${NONROOT_USER}" "${NONROOT_UID}" "${NONROOT_GID}" "${NONROOT_USER}" \
         > /rootfs/etc/passwd \
@@ -326,7 +348,10 @@ RUN mkdir -p /rootfs/etc /rootfs/tmp /rootfs/usr/local/bin /rootfs/usr/src /root
     && chmod 1777 /rootfs/tmp \
     && chown -R "${NONROOT_UID}:${NONROOT_GID}" /rootfs/var/www/html \
     && cp -a /etc/ssl /rootfs/etc/ssl \
-    && cp -a /etc/pki /rootfs/etc/pki 2>/dev/null || true
+    && cp -a /etc/pki /rootfs/etc/pki 2>/dev/null || true \
+    && cp /etc/services /rootfs/etc/services \
+    && cp /etc/protocols /rootfs/etc/protocols \
+    && ensure-ca-bundle.sh /rootfs
 
 RUN if [ "${INCLUDE_TZDATA}" = "1" ]; then \
         mkdir -p /rootfs/usr/share \
@@ -348,10 +373,17 @@ RUN --mount=type=cache,target=/var/cache/distfiles,id=gentoo-distfiles-${GENTOO_
     && cp -L "${BB}" /rootfs/bin/busybox \
     && strip --strip-all /rootfs/bin/busybox \
     && ln -sf busybox /rootfs/bin/sh \
+    && mkdir -p /rootfs/usr/bin \
+    && ln -sf ../../bin/busybox /rootfs/usr/bin/env \
+    && ln -sf ../../bin/busybox /rootfs/usr/bin/wget \
+    && ln -sf ../local/bin/php /rootfs/usr/bin/php \
     && file /rootfs/bin/busybox | grep -qi 'statically linked' \
+    && grep -qE '^(http|https)[[:space:]]+[0-9]+' /rootfs/etc/services \
     && chmod 755 /rootfs/usr/local/bin/docker-php-entrypoint \
     && head -n1 /rootfs/usr/local/bin/docker-php-entrypoint | grep -q '^#!/bin/sh$' \
-    && /rootfs/bin/sh -c 'echo busybox-sh-ok'
+    && /rootfs/bin/sh -c '/usr/bin/env php -V >/dev/null && echo busybox-sh-ok' \
+    && /rootfs/bin/busybox wget -q -O /dev/null -T 20 https://getcomposer.org/installer \
+    && echo build-wget-ok
 
 # -----------------------------------------------------------------------------
 # cli / fpm — FROM scratch (shared scratch-runtime + variant collect)
@@ -366,8 +398,9 @@ LABEL org.opencontainers.image.title="gentoo-php-cli" \
       org.opencontainers.image.base.name="scratch"
 
 ENV PHP_INI_DIR=/usr/local/etc/php \
-    PATH=/usr/local/bin:/usr/local/sbin:/bin \
+    PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/bin \
     SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    SSL_CERT_DIR=/etc/ssl/certs \
     TZ=UTC
 
 COPY --from=scratch-runtime-cli /rootfs/ /
@@ -419,6 +452,7 @@ LABEL org.opencontainers.image.title="gentoo-php-fpm" \
 ENV PHP_INI_DIR=/usr/local/etc/php \
     PATH=/usr/local/bin:/usr/local/sbin \
     SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    SSL_CERT_DIR=/etc/ssl/certs \
     TZ=UTC
 
 COPY --from=scratch-runtime /rootfs/ /

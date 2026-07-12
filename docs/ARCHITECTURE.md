@@ -162,12 +162,12 @@ Official `php-fpm` starts as root, drops to `www-data`. We run `USER 82:82` from
 
 **FPM production config:**
 - `pm = dynamic` with tuned spare servers
-- `opcache.enable=1`, `validate_timestamps=0`, JIT `1255` / 128M buffer
+- `opcache.enable=1`, `validate_timestamps=1`, JIT `1255` / 128M buffer
 - `realpath_cache_size=4096K`
 - `daemonize = no`, logs to `/proc/self/fd/2`
 - `HEALTHCHECK`: `php docker-php-healthcheck.php health`
 - FPM probes: startup (`php-fpm -t`), liveness/readiness (PHP script)
-- Pool: `security.limit_extensions = .php`, `open_basedir`, `allow_url_* = off`
+- Pool: `security.limit_extensions = .php`, ping `/fpm-ping` (no `open_basedir`; `allow_url_fopen` via php.ini)
 
 ### collect-cli / collect-fpm (runtime-builder)
 
@@ -181,7 +181,7 @@ Official `php-fpm` starts as root, drops to `www-data`. We run `USER 82:82` from
 
 ### scratch-runtime-cli
 
-Static busybox `/bin/sh` + upstream `docker-php-entrypoint` — **CLI production only**.
+Static busybox `/bin/sh` + `/usr/bin/env` + `/usr/bin/php` symlink — **CLI production only**.
 
 ### scratch-runtime (FPM)
 
@@ -299,8 +299,8 @@ docker buildx bake -f docker-bake.hcl all
 | CET | `USE=cet` where CPU supports |
 | Non-root | USER 82:82 always |
 | No shell (fpm) | FPM: zero `/bin/sh`; CLI: static busybox only |
-| PHP lockdown | `hardening-production.ini` — disable_functions, no URL includes |
-| FPM pool | `security.limit_extensions`, `open_basedir` |
+| PHP lockdown | `hardening-production.ini` — prod defaults, no `disable_functions` (docker-library parity) |
+| FPM pool | `security.limit_extensions`; optional `hardening-strict.ini` downstream |
 | Read-only FS | K8s `readOnlyRootFilesystem` + `/tmp` emptyDir |
 | Verification | `verify-hardening.sh` fail-closed in CI |
 
@@ -318,6 +318,7 @@ docker buildx bake -f docker-bake.hcl all
 | phpdbg | CLI only | CLI builder only, stripped from runtime |
 | pear/pecl in runtime | Present | SDK only (PIE, not PECL) |
 | opcache in base CLI | Not enabled | Not enabled (FPM: production ini) |
+| Runtime PHP ini | php.ini-production defaults | Same intent — no `disable_functions`, `allow_url_fopen=On` |
 
 All deviations are documented and justified by the priority order.
 
