@@ -222,7 +222,7 @@ Target: `extension-sdk` (FROM `builder-php` + PECL).
 
 **Workflow:**
 ```dockerfile
-FROM php:8.5.8-sdk
+FROM ghcr.io/lemric/gentoo-php/php:sdk-8.5.8
 RUN install-lib libjpeg libpng freetype
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg
 RUN docker-php-ext-install -j$(nproc) gd
@@ -264,10 +264,10 @@ Official Dockerfiles work with `apt-get` → replace with `install-lib` / `emerg
 ## CI/CD
 
 **GitHub Actions** (`.github/workflows/build.yml`):
-- Matrix: `{cli,fpm} × {amd64,arm64}`
-- BuildKit GHA cache
-- SBOM + provenance attestations
-- Cosign signing on git tags
+- 2 native jobs (amd64 + arm64): `docker buildx bake all-{arch}` — shared `builder-php`, then cli/fpm/sdk
+- Per-arch push: `cli-8.5.8-amd64`, `cli-8.5.8-arm64`, …
+- Manifest job: `docker buildx imagetools create` → public multi-arch tags `cli-8.5.8`, `fpm-8.5.8`, `sdk-8.5.8`
+- BuildKit GHA cache (scope per arch)
 - Secrets: `PHP_GPG_KEYS`, optional `PHP_SHA256`
 
 **Local:**

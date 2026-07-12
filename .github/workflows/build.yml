@@ -17,7 +17,7 @@ env:
 
 jobs:
   build:
-    name: ${{ matrix.tag }} (${{ matrix.arch }})
+    name: bake all (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -27,38 +27,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # amd64 — native x86_64 runner (no QEMU)
-          - tag: cli
-            docker_target: cli
-            arch: amd64
-            platform: linux/amd64
+          # One job per native arch: builder-php once, then cli + fpm + sdk
+          - arch: amd64
             runner: ubuntu-24.04
-          - tag: fpm
-            docker_target: fpm
-            arch: amd64
-            platform: linux/amd64
-            runner: ubuntu-24.04
-          - tag: sdk
-            docker_target: extension-sdk
-            arch: amd64
-            platform: linux/amd64
-            runner: ubuntu-24.04
-          # arm64 — native ARM64 runner (no QEMU)
-          - tag: cli
-            docker_target: cli
-            arch: arm64
-            platform: linux/arm64
+            bake_group: all-amd64
+          - arch: arm64
             runner: ubuntu-24.04-arm
-          - tag: fpm
-            docker_target: fpm
-            arch: arm64
-            platform: linux/arm64
-            runner: ubuntu-24.04-arm
-          - tag: sdk
-            docker_target: extension-sdk
-            arch: arm64
-            platform: linux/arm64
-            runner: ubuntu-24.04-arm
+            bake_group: all-arm64
 
     steps:
       - name: Checkout
@@ -75,65 +50,108 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
+      - name: Bake cli + fpm + sdk (shared builder-php graph)
+        env:
+          PHP_GPG_KEYS: ${{ secrets.PHP_GPG_KEYS }}
+          PHP_SHA256: ${{ secrets.PHP_SHA256 }}
+        run: |
+          set -euo pipefail
+          args=(
+            docker buildx bake -f docker-bake.hcl "${{ matrix.bake_group }}"
+            --provenance=false
+            --var "ARCH=${{ matrix.arch }}"
+            --var "REGISTRY=${{ env.REGISTRY }}"
+            --var "PHP_VERSION=${{ env.PHP_VERSION }}"
+            --var "PORTAGE_TMPFS_SIZE=${{ env.PORTAGE_TMPFS_SIZE }}"
+            --var "CACHE_SCOPE=gentoo-php-${{ matrix.arch }}"
+            --var "PHP_GPG_KEYS=${PHP_GPG_KEYS}"
+            --var "PHP_SHA256=${PHP_SHA256}"
+          )
+          if [ "${{ github.event_name }}" != 'pull_request' ]; then
+            args+=(--push)
+          fi
+          "${args[@]}"
+
+      - name: Load images for smoke tests (PR)
+        if: github.event_name == 'pull_request'
+        env:
+          PHP_GPG_KEYS: ${{ secrets.PHP_GPG_KEYS }}
+          PHP_SHA256: ${{ secrets.PHP_SHA256 }}
+        run: |
+          set -euo pipefail
+          common=(
+            --provenance=false
+            --var "ARCH=${{ matrix.arch }}"
+            --var "REGISTRY=${{ env.REGISTRY }}"
+            --var "PHP_VERSION=${{ env.PHP_VERSION }}"
+            --var "PORTAGE_TMPFS_SIZE=${{ env.PORTAGE_TMPFS_SIZE }}"
+            --var "CACHE_SCOPE=gentoo-php-${{ matrix.arch }}"
+            --var "PHP_GPG_KEYS=${PHP_GPG_KEYS}"
+            --var "PHP_SHA256=${PHP_SHA256}"
+          )
+          for target in cli fpm extension-sdk; do
+            docker buildx bake -f docker-bake.hcl "${target}" --load "${common[@]}"
+          done
+
+      - name: Smoke tests
+        run: |
+          set -euo pipefail
+          repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          ver="${{ env.PHP_VERSION }}"
+          if [ "${{ github.event_name }}" != 'pull_request' ]; then
+            cli="${repo}:cli-${ver}-${{ matrix.arch }}"
+            fpm="${repo}:fpm-${ver}-${{ matrix.arch }}"
+            sdk="${repo}:sdk-${ver}-${{ matrix.arch }}"
+            docker pull "$cli" "$fpm" "$sdk"
+          else
+            cli="${repo}:cli-${ver}"
+            fpm="${repo}:fpm-${ver}"
+            sdk="${repo}:sdk-${ver}"
+          fi
+          docker run --rm "$cli" php -v
+          docker run --rm "$cli" php -r 'exit(posix_getuid() === 0 ? 1 : 0);'
+          docker run --rm "$fpm" php-fpm -t
+          docker run --rm "$sdk" php -v
+
+  manifest:
+    name: publish multi-arch manifests
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=${{ env.PHP_VERSION }}-${{ matrix.tag }}-${{ matrix.arch }}
-            type=raw,value=${{ env.PHP_VERSION }}-${{ matrix.tag }},enable=${{ matrix.arch == 'amd64' }}
-            type=raw,value=${{ env.PHP_VERSION }}-${{ matrix.tag }}-${{ matrix.arch }},enable=${{ startsWith(github.ref, 'refs/tags/') }}
-            type=semver,pattern={{version}}-${{ matrix.tag }}-${{ matrix.arch }},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-            type=semver,pattern={{version}}-${{ matrix.tag }},enable=${{ matrix.arch == 'amd64' && startsWith(github.ref, 'refs/tags/v') }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
-        id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/Dockerfile
-          target: ${{ matrix.docker_target }}
-          platforms: ${{ matrix.platform }}
-          push: ${{ github.event_name != 'pull_request' }}
-          load: ${{ github.event_name == 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            PHP_VERSION=${{ env.PHP_VERSION }}
-            PHP_GPG_KEYS=${{ secrets.PHP_GPG_KEYS }}
-            PHP_SHA256=${{ secrets.PHP_SHA256 }}
-            GENTOO_CACHE_ID=${{ matrix.arch }}
-            PORTAGE_TMPFS_SIZE=${{ env.PORTAGE_TMPFS_SIZE }}
-            GENTOO_SYNC=0
-          cache-from: type=gha,scope=${{ matrix.tag }}-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.tag }}-${{ matrix.arch }}
-          provenance: false
-
-      - name: Smoke test (cli)
-        if: matrix.tag == 'cli'
+      - name: Create multi-arch manifests
         run: |
-          IMG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.PHP_VERSION }}-cli-${{ matrix.arch }}"
-          if [ "${{ github.event_name }}" != 'pull_request' ]; then
-            docker pull "$IMG"
-          fi
-          docker run --rm "$IMG" php -v
-          docker run --rm "$IMG" php -r 'exit(posix_getuid() === 0 ? 1 : 0);'
+          set -euo pipefail
+          repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          ver="${{ env.PHP_VERSION }}"
+          for variant in cli fpm sdk; do
+            docker buildx imagetools create \
+              -t "${repo}:${variant}-${ver}" \
+              "${repo}:${variant}-${ver}-amd64" \
+              "${repo}:${variant}-${ver}-arm64"
+          done
 
-      - name: Smoke test (fpm)
-        if: matrix.tag == 'fpm'
+      - name: Smoke tests (multi-arch tags)
         run: |
-          IMG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.PHP_VERSION }}-fpm-${{ matrix.arch }}"
-          if [ "${{ github.event_name }}" != 'pull_request' ]; then
-            docker pull "$IMG"
-          fi
-          docker run --rm "$IMG" php-fpm -t
-
-      - name: Smoke test (sdk)
-        if: matrix.tag == 'sdk'
-        run: |
-          IMG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.PHP_VERSION }}-sdk-${{ matrix.arch }}"
-          if [ "${{ github.event_name }}" != 'pull_request' ]; then
-            docker pull "$IMG"
-          fi
-          docker run --rm "$IMG" php -v
+          set -euo pipefail
+          repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          ver="${{ env.PHP_VERSION }}"
+          docker pull "${repo}:cli-${ver}" "${repo}:fpm-${ver}" "${repo}:sdk-${ver}"
+          docker run --rm "${repo}:cli-${ver}" php -v
+          docker run --rm "${repo}:cli-${ver}" php -r 'exit(posix_getuid() === 0 ? 1 : 0);'
+          docker run --rm "${repo}:fpm-${ver}" php-fpm -t
+          docker run --rm "${repo}:sdk-${ver}" php -v

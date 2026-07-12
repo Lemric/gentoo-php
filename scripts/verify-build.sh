@@ -7,10 +7,8 @@ DOCKERFILE="${ROOT}/docker/Dockerfile"
 ARCH="${ARCH:-amd64}"
 PLATFORM="${PLATFORM:-linux/${ARCH}}"
 PHP_VERSION="${PHP_VERSION:-8.5.8}"
-TAG_SUFFIX=""
-[ "${ARCH}" != "amd64" ] && TAG_SUFFIX="-${ARCH}"
-IMG_CLI="php:${PHP_VERSION}-cli${TAG_SUFFIX}"
-IMG_FPM="php:${PHP_VERSION}-fpm${TAG_SUFFIX}"
+IMG_CLI="php:cli-${PHP_VERSION}"
+IMG_FPM="php:fpm-${PHP_VERSION}"
 ENTRYPOINT="/usr/local/bin/docker-php-entrypoint"
 
 step() { printf '\n\033[1;36m==> %s\033[0m\n' "$1"; }
@@ -49,7 +47,7 @@ DOCKER_BUILDKIT=1 docker build \
     -t "${IMG_FPM}" "${ROOT}"
 
 step "3/8  Image sizes"
-docker images --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}' | grep -E "${PHP_VERSION}-cli|${PHP_VERSION}-fpm|REPOSITORY"
+docker images --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}' | grep -E "cli-${PHP_VERSION}|fpm-${PHP_VERSION}|REPOSITORY"
 
 step "4/8  Smoke tests"
 docker run --rm "${IMG_CLI}" php -v

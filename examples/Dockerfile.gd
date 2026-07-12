@@ -10,7 +10,7 @@
 # in stage builder-php (Option A — recommended).
 
 ARG SDK_IMAGE=php:8.5.8-sdk
-ARG CLI_IMAGE=php:8.5.8-cli
+ARG CLI_IMAGE=ghcr.io/lemric/gentoo-php/php:cli-8.5.8
 ARG NONROOT_UID=82
 ARG NONROOT_GID=82
 

@@ -27,17 +27,17 @@ docker build --platform linux/amd64 -f docker/Dockerfile --target cli ...
 docker build --platform linux/arm64 -f docker/Dockerfile --target cli ...
 ```
 
-| `ARCH` | Platforma | Przykładowy tag |
-|--------|-----------|-----------------|
-| `amd64` (domyślnie) | `linux/amd64` | `php:8.5.8-cli` |
-| `arm64` | `linux/arm64` | `php:8.5.8-cli-arm64` |
+| `ARCH` | Platforma | Tag (multi-arch w registry) |
+|--------|-----------|-----------------------------|
+| `amd64` (domyślnie) | `linux/amd64` | `ghcr.io/lemric/gentoo-php/php:cli-8.5.8` |
+| `arm64` | `linux/arm64` | ten sam tag — manifest wybiera architekturę |
 
 ```bash
 make all          # zalecane: bake cli + fpm (ARCH=amd64 domyślnie)
 make verify
 docker buildx bake -f docker-bake.hcl all              # amd64
 docker buildx bake -f docker-bake.hcl all --set ARCH=arm64
-docker buildx bake -f docker-bake.hcl multiarch        # obie architektury (CI)
+# CI: bake per arch → manifest job łączy w cli-8.5.8 / fpm-8.5.8 / sdk-8.5.8
 ```
 
 ## Architektura
@@ -53,9 +53,9 @@ Szczegóły: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 | Target | Tag | Opis |
 |--------|-----|------|
-| `cli` | `php:8.5.8-cli` | PHP CLI, scratch, UID 82 |
-| `fpm` | `php:8.5.8-fpm` | PHP-FPM, scratch, UID 82 |
-| `extension-sdk` | `php:8.5.8-sdk` | Budowanie rozszerzeń (phpize, pecl) |
+| `cli` | `php:cli-8.5.8` | PHP CLI, scratch, UID 82 |
+| `fpm` | `php:fpm-8.5.8` | PHP-FPM, scratch, UID 82 |
+| `extension-sdk` | `php:sdk-8.5.8` | Budowanie rozszerzeń (phpize, pecl) |
 
 ## Zgodność z docker-library/php
 
@@ -91,7 +91,7 @@ make sdk
 ```
 
 ```dockerfile
-FROM php:8.5.8-sdk
+FROM ghcr.io/lemric/gentoo-php/php:sdk-8.5.8
 RUN install-lib libjpeg libpng freetype
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg
 RUN docker-php-ext-install -j$(nproc) gd

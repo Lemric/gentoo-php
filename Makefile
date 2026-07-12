@@ -11,13 +11,6 @@ PLATFORM := linux/$(ARCH)
 export PHP_GPG_KEYS ?=
 # Optional: defaults match docker-library/php 8.5; override when php.net adds release signers
 
-# Tag suffix: amd64 = no suffix (default), arm64 = -arm64
-ifeq ($(ARCH),amd64)
-IMAGE_TAG_SUFFIX :=
-else
-IMAGE_TAG_SUFFIX := -$(ARCH)
-endif
-
 # Parallel build tuning (0 = auto-detect nproc inside container)
 BUILD_JOBS ?= 0
 EMERGE_JOBS ?= 0
@@ -136,7 +129,7 @@ cli: _check_keys _check_arch
 		--build-arg PHP_VERSION=$(PHP_VERSION) \
 		--build-arg PHP_GPG_KEYS="$(PHP_GPG_KEYS)" \
 		$(PARALLEL_ARGS) \
-		-t $(IMAGE_NAME):$(PHP_VERSION)-cli$(IMAGE_TAG_SUFFIX) \
+		-t $(IMAGE_NAME):cli-$(PHP_VERSION) \
 		.
 
 fpm: _check_keys _check_arch
@@ -144,7 +137,7 @@ fpm: _check_keys _check_arch
 		--build-arg PHP_VERSION=$(PHP_VERSION) \
 		--build-arg PHP_GPG_KEYS="$(PHP_GPG_KEYS)" \
 		$(PARALLEL_ARGS) \
-		-t $(IMAGE_NAME):$(PHP_VERSION)-fpm$(IMAGE_TAG_SUFFIX) \
+		-t $(IMAGE_NAME):fpm-$(PHP_VERSION) \
 		.
 
 sdk: _check_keys _check_arch
@@ -152,7 +145,7 @@ sdk: _check_keys _check_arch
 		--build-arg PHP_VERSION=$(PHP_VERSION) \
 		--build-arg PHP_GPG_KEYS="$(PHP_GPG_KEYS)" \
 		$(PARALLEL_ARGS) \
-		-t $(IMAGE_NAME):$(PHP_VERSION)-sdk$(IMAGE_TAG_SUFFIX) \
+		-t $(IMAGE_NAME):sdk-$(PHP_VERSION) \
 		.
 
 builder-base toolchain php-builder builder-php extension-sdk collect-cli collect-fpm scratch-runtime: _check_arch
@@ -168,10 +161,7 @@ verify: _check_arch
 
 clean:
 	-docker rmi \
-		$(IMAGE_NAME):$(PHP_VERSION)-cli \
-		$(IMAGE_NAME):$(PHP_VERSION)-cli-arm64 \
-		$(IMAGE_NAME):$(PHP_VERSION)-fpm \
-		$(IMAGE_NAME):$(PHP_VERSION)-fpm-arm64 \
-		$(IMAGE_NAME):$(PHP_VERSION)-sdk \
-		$(IMAGE_NAME):$(PHP_VERSION)-sdk-arm64 \
+		$(IMAGE_NAME):cli-$(PHP_VERSION) \
+		$(IMAGE_NAME):fpm-$(PHP_VERSION) \
+		$(IMAGE_NAME):sdk-$(PHP_VERSION) \
 		2>/dev/null
