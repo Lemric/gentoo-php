@@ -130,6 +130,7 @@ COPY scripts/docker-php-env /usr/local/bin/docker-php-env
 COPY scripts/build/install-lib /usr/local/bin/install-lib
 COPY scripts/build/configure-php.sh /usr/local/bin/configure-php.sh
 COPY scripts/build/fix-fpm-config.sh /usr/local/bin/fix-fpm-config.sh
+COPY configs/fpm/php-fpm.conf /usr/local/share/gentoo-php/fpm/php-fpm.conf
 COPY scripts/build/setup-fpm-config.sh /usr/local/bin/setup-fpm-config.sh
 COPY scripts/build/verify-php-tarball.sh /usr/local/bin/verify-php-tarball.sh
 RUN chmod +x /usr/local/bin/docker-php-* /usr/local/bin/install-lib \
@@ -202,11 +203,14 @@ RUN mkdir -p /staging/usr/local \
 
 FROM builder-php AS collect-fpm
 COPY scripts/build/collect-runtime.sh scripts/build/analyze-deps.sh scripts/build/fix-fpm-config.sh /usr/local/bin/
+COPY configs/fpm/php-fpm.conf /usr/local/share/gentoo-php/fpm/php-fpm.conf
 RUN chmod +x /usr/local/bin/collect-runtime.sh /usr/local/bin/analyze-deps.sh /usr/local/bin/fix-fpm-config.sh
 RUN mkdir -p /staging/usr/local \
     && cp -a /usr/local/. /staging/usr/local/ \
     && collect-runtime.sh /staging /usr/local fpm \
-    && analyze-deps.sh /staging /usr/local
+    && analyze-deps.sh /staging /usr/local \
+    && /usr/local/bin/fix-fpm-config.sh /staging/usr/local \
+    && ! grep -Fq 'NONE/' /staging/usr/local/etc/php-fpm.conf
 
 # -----------------------------------------------------------------------------
 # scratch-runtime — shared rootfs skeleton (+ /bin/sh via static busybox)

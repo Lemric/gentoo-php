@@ -3,31 +3,24 @@
 #
 # Usage: fix-fpm-config.sh <install-prefix>
 #   e.g. /usr/local  or  /staging/usr/local
-#
-# Fixes php/php-src#20845 (include=NONE/...) and log/pid paths removed by collect-runtime.
 set -euo pipefail
 
 PREFIX="${1:?install prefix required}"
 ETC="${PREFIX}/etc"
 FPM_D="${ETC}/php-fpm.d"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEMPLATE="${SCRIPT_DIR}/php-fpm.conf"
+[ -f "${TEMPLATE}" ] || TEMPLATE="/usr/local/share/gentoo-php/fpm/php-fpm.conf"
 
 [ -d "${ETC}" ] || exit 0
 
-if [ ! -f "${ETC}/php-fpm.conf" ] && [ -f "${ETC}/php-fpm.conf.default" ]; then
-    cp "${ETC}/php-fpm.conf.default" "${ETC}/php-fpm.conf"
-fi
+mkdir -p "${FPM_D}"
 
-if [ -d "${FPM_D}" ] && [ ! -f "${FPM_D}/www.conf" ] && [ -f "${FPM_D}/www.conf.default" ]; then
+if [ ! -f "${FPM_D}/www.conf" ] && [ -f "${FPM_D}/www.conf.default" ]; then
     cp "${FPM_D}/www.conf.default" "${FPM_D}/www.conf"
 fi
 
-[ -f "${ETC}/php-fpm.conf" ] || exit 0
-
-sed -i \
-    -e 's|^include=.*|include=/usr/local/etc/php-fpm.d/*.conf|' \
-    -e 's|^;*error_log = .*|error_log = /proc/self/fd/2|' \
-    -e 's|^;*pid = .*|pid = /tmp/php-fpm.pid|' \
-    "${ETC}/php-fpm.conf"
+install -m 644 "${TEMPLATE}" "${ETC}/php-fpm.conf"
 
 if [ -f "${FPM_D}/www.conf" ]; then
     sed -i \
@@ -39,8 +32,6 @@ if [ -f "${FPM_D}/www.conf" ]; then
         -e 's/^;\?listen.group.*/;listen.group = unused/' \
         "${FPM_D}/www.conf"
 fi
-
-mkdir -p "${FPM_D}"
 
 printf '%s\n' \
     '[global]' \
@@ -65,3 +56,13 @@ printf '%s\n' \
     'decorate_workers_output = no' \
     'request_terminate_timeout = 300s' \
     >> "${FPM_D}/zz-docker.conf"
+
+if grep -Fq 'NONE/' "${ETC}/php-fpm.conf"; then
+    echo "fix-fpm-config: broken include still present in ${ETC}/php-fpm.conf" >&2
+    exit 1
+fi
+
+if [ ! -f "${FPM_D}/www.conf" ] || [ ! -f "${FPM_D}/zz-docker.conf" ]; then
+    echo "fix-fpm-config: missing pool configs under ${FPM_D}" >&2
+    exit 1
+fi

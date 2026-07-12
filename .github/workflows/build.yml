@@ -51,6 +51,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Bake cli + fpm + sdk (shared builder-php graph)
+        id: bake
         env:
           PHP_GPG_KEYS: ${{ secrets.PHP_GPG_KEYS }}
           PHP_SHA256: ${{ secrets.PHP_SHA256 }}
@@ -93,21 +94,27 @@ jobs:
             docker buildx bake -f docker-bake.hcl "${target}" --load "${common[@]}"
           done
 
-      - name: Smoke tests
+      - name: Smoke tests (per-arch)
+        if: steps.bake.outcome == 'success'
+        continue-on-error: true
         run: |
           set -euo pipefail
           repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
           ver="${{ env.PHP_VERSION }}"
           if [ "${{ github.event_name }}" != 'pull_request' ]; then
-            cli="${repo}:cli-${ver}-${{ matrix.arch }}"
-            fpm="${repo}:fpm-${ver}-${{ matrix.arch }}"
-            sdk="${repo}:sdk-${ver}-${{ matrix.arch }}"
-            docker pull "$cli" "$fpm" "$sdk"
+            suffix="-${{ matrix.arch }}"
+            for img in \
+              "${repo}:cli-${ver}${suffix}" \
+              "${repo}:fpm-${ver}${suffix}" \
+              "${repo}:sdk-${ver}${suffix}"; do
+              docker pull "$img"
+            done
           else
-            cli="${repo}:cli-${ver}"
-            fpm="${repo}:fpm-${ver}"
-            sdk="${repo}:sdk-${ver}"
+            suffix=""
           fi
+          cli="${repo}:cli-${ver}${suffix}"
+          fpm="${repo}:fpm-${ver}${suffix}"
+          sdk="${repo}:sdk-${ver}${suffix}"
           docker run --rm "$cli" php -v
           docker run --rm "$cli" php -r 'exit(posix_getuid() === 0 ? 1 : 0);'
           docker run --rm "$fpm" php-fpm -t
@@ -133,6 +140,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Verify per-arch images exist
+        run: |
+          set -euo pipefail
+          repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          ver="${{ env.PHP_VERSION }}"
+          for variant in cli fpm sdk; do
+            for arch in amd64 arm64; do
+              docker buildx imagetools inspect "${repo}:${variant}-${ver}-${arch}"
+            done
+          done
+
       - name: Create multi-arch manifests
         run: |
           set -euo pipefail
@@ -145,13 +163,34 @@ jobs:
               "${repo}:${variant}-${ver}-arm64"
           done
 
+      - name: Remove per-arch tags (public tags are unsuffixed)
+        run: |
+          set -euo pipefail
+          repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          ver="${{ env.PHP_VERSION }}"
+          for variant in cli fpm sdk; do
+            for arch in amd64 arm64; do
+              docker buildx imagetools rm "${repo}:${variant}-${ver}-${arch}" || true
+            done
+          done
+
       - name: Smoke tests (multi-arch tags)
         run: |
           set -euo pipefail
           repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
           ver="${{ env.PHP_VERSION }}"
-          docker pull "${repo}:cli-${ver}" "${repo}:fpm-${ver}" "${repo}:sdk-${ver}"
+          for img in \
+            "${repo}:cli-${ver}" \
+            "${repo}:fpm-${ver}" \
+            "${repo}:sdk-${ver}"; do
+            docker pull "$img"
+          done
           docker run --rm "${repo}:cli-${ver}" php -v
           docker run --rm "${repo}:cli-${ver}" php -r 'exit(posix_getuid() === 0 ? 1 : 0);'
           docker run --rm "${repo}:fpm-${ver}" php-fpm -t
           docker run --rm "${repo}:sdk-${ver}" php -v
+
+          echo "Multi-arch manifests:"
+          for variant in cli fpm sdk; do
+            docker buildx imagetools inspect "${repo}:${variant}-${ver}"
+          done

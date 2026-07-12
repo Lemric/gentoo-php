@@ -3,8 +3,5 @@
 set -euo pipefail
 
 cd /usr/local/etc
-
-cp php-fpm.conf.default php-fpm.conf
 cp php-fpm.d/www.conf.default php-fpm.d/www.conf
-
 exec /usr/local/bin/fix-fpm-config.sh /usr/local
