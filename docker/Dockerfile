@@ -187,7 +187,7 @@ RUN --mount=type=cache,target=/var/cache/distfiles,id=gentoo-distfiles-${GENTOO_
     --mount=type=cache,target=/var/cache/ccache,id=gentoo-ccache-${GENTOO_CACHE_ID},sharing=locked \
     mkdir -p /var/cache/binhost \
     && chmod 755 /usr/local/bin/pie \
-    && emerge --verbose dev-vcs/git app-archives/unzip \
+    && emerge --verbose dev-vcs/git app-arch/unzip \
     && pie -V
 
 # Optional extensions — uncomment once:
