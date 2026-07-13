@@ -358,11 +358,13 @@ ARG GENTOO_SYNC
 
 COPY scripts/build/ensure-ca-bundle.sh /usr/local/bin/ensure-ca-bundle.sh
 RUN chmod +x /usr/local/bin/ensure-ca-bundle.sh \
-    && mkdir -p /rootfs/etc /rootfs/tmp /rootfs/usr/local/bin /rootfs/usr/src /rootfs/var/www/html \
+    && mkdir -p /rootfs/etc /rootfs/tmp /rootfs/root /rootfs/usr/local/bin /rootfs/usr/src /rootfs/var/www/html \
+    && printf 'root:x:0:0:root:/root:/bin/sh\n' > /rootfs/etc/passwd \
     && printf '%s:x:%s:%s:%s:/var/www/html:/sbin/nologin\n' \
         "${NONROOT_USER}" "${NONROOT_UID}" "${NONROOT_GID}" "${NONROOT_USER}" \
-        > /rootfs/etc/passwd \
-    && printf '%s:x:%s:\n' "${NONROOT_USER}" "${NONROOT_GID}" > /rootfs/etc/group \
+        >> /rootfs/etc/passwd \
+    && printf 'root:x:0:\n' > /rootfs/etc/group \
+    && printf '%s:x:%s:\n' "${NONROOT_USER}" "${NONROOT_GID}" >> /rootfs/etc/group \
     && printf 'hosts: files dns\n' > /rootfs/etc/nsswitch.conf \
     && chmod 1777 /rootfs/tmp \
     && chown -R "${NONROOT_UID}:${NONROOT_GID}" /rootfs/var/www/html \
