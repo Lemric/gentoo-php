@@ -226,7 +226,7 @@ RUN mkdir -p /staging/usr/local /staging/usr/src \
     && cp -a /usr/src/php.tar.xz /staging/usr/src/php.tar.xz \
     && bundle-install-stack.sh /staging/usr/local/libexec/install \
     && IR=/staging/usr/local/libexec/install \
-    && for sub in usr/bin usr/sbin usr/lib usr/lib64 lib lib64; do \
+    && for sub in usr/bin usr/sbin usr/lib usr/lib64 usr/share lib lib64; do \
         if [ -d "${IR}/${sub}" ]; then \
             mkdir -p "/staging/${sub}"; \
             cp -a "${IR}/${sub}/." "/staging/${sub}/"; \
@@ -255,7 +255,7 @@ RUN mkdir -p /staging/usr/local /staging/usr/src \
     && cp -a /usr/src/php.tar.xz /staging/usr/src/php.tar.xz \
     && bundle-install-stack.sh /staging/usr/local/libexec/install \
     && IR=/staging/usr/local/libexec/install \
-    && for sub in usr/bin usr/sbin usr/lib usr/lib64 lib lib64; do \
+    && for sub in usr/bin usr/sbin usr/lib usr/lib64 usr/share lib lib64; do \
         if [ -d "${IR}/${sub}" ]; then \
             mkdir -p "/staging/${sub}"; \
             cp -a "${IR}/${sub}/." "/staging/${sub}/"; \

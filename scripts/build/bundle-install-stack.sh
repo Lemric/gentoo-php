@@ -32,13 +32,25 @@ copy_with_ldd() {
 TOOL_BINS=(
     git unzip tar xz bzip2 gzip
     gcc g++ cpp cc c++ ld
-    make autoconf automake libtoolize libtool pkg-config
+    make libtoolize libtool pkg-config
     re2c bison flex sed awk grep find
-    python3 python-exec2c emerge
+    python-exec2c emerge
 )
 
 for name in "${TOOL_BINS[@]}"; do
     path="$(command -v "${name}" 2>/dev/null || true)"
+    [ -n "${path}" ] && copy_with_ldd "${path}"
+done
+
+# autoconf/automake share + real binaries (phpize needs autoheader, not just ac-wrapper)
+for share in /usr/share/autoconf /usr/share/autoconf-* /usr/share/aclocal /usr/share/aclocal-* /usr/share/automake-*; do
+    [ -e "${share}" ] || continue
+    mkdir -p "${DEST}$(dirname "${share}")"
+    cp -a "${share}" "${DEST}${share}"
+done
+
+for tool in autoconf autoheader autom4te aclocal automake; do
+    path="$(command -v "${tool}" 2>/dev/null || true)"
     [ -n "${path}" ] && copy_with_ldd "${path}"
 done
 
@@ -48,13 +60,30 @@ if [ -d /usr/lib/python-exec ]; then
     cp -a /usr/lib/python-exec "${DEST}/usr/lib/"
 fi
 
-# Portage Python modules + config (binpkg-only installs at runtime)
+# Real CPython + stdlib (command -v python3 is the python-exec wrapper, not the interpreter)
 PYVER="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+REAL_PY="/usr/bin/python${PYVER}"
+if [ ! -x "${REAL_PY}" ]; then
+    REAL_PY="$(readlink -f "/usr/lib/python-exec/python${PYVER}/python" 2>/dev/null || true)"
+fi
+if [ -n "${REAL_PY}" ] && [ -x "${REAL_PY}" ]; then
+    copy_with_ldd "${REAL_PY}"
+else
+    echo "bundle-install-stack: CPython ${PYVER} not found" >&2
+    exit 1
+fi
+
 for pyroot in "/usr/lib/python${PYVER}" "/usr/lib64/python${PYVER}"; do
-    [ -d "${pyroot}/site-packages/portage" ] || continue
-    mkdir -p "${DEST}${pyroot}/site-packages"
-    cp -a "${pyroot}/site-packages/portage" "${DEST}${pyroot}/site-packages/"
+    [ -d "${pyroot}" ] || continue
+    mkdir -p "${DEST}${pyroot}"
+    cp -a "${pyroot}/." "${DEST}${pyroot}/"
 done
+
+# emerge / python-exec2c shebangs expect /usr/bin/python-exec2c
+mkdir -p "${DEST}/usr/bin"
+if [ ! -e "${DEST}/usr/bin/python-exec2c" ]; then
+    ln -sf "../sbin/python-exec2c" "${DEST}/usr/bin/python-exec2c"
+fi
 
 cp -a /etc/portage/. "${PORTAGE}/etc/portage/"
 [ -d /var/db/repos/gentoo ] && cp -a /var/db/repos/gentoo "${PORTAGE}/var/db/repos/gentoo"
