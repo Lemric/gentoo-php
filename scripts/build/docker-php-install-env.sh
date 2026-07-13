@@ -5,7 +5,7 @@
 INSTALL_ROOT="${INSTALL_ROOT:-/usr/local/libexec/install}"
 PORTAGE_ROOT="${INSTALL_ROOT}/portage"
 
-export PATH="${INSTALL_ROOT}/usr/bin:${INSTALL_ROOT}/usr/sbin:${PATH}"
+export PATH="${INSTALL_ROOT}/bin:${INSTALL_ROOT}/usr/bin:${INSTALL_ROOT}/usr/sbin:${PATH}"
 export PORTAGE_CONFIGROOT="${PORTAGE_ROOT}"
 export PORTDIR="${PORTAGE_ROOT}/var/db/repos/gentoo"
 export DISTDIR="/tmp/gentoo-distfiles"

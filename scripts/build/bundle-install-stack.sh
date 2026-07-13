@@ -34,13 +34,19 @@ TOOL_BINS=(
     gcc g++ cpp cc c++ ld
     make autoconf automake libtoolize libtool pkg-config
     re2c bison flex sed awk grep find
-    python3 emerge
+    python3 python-exec2c emerge
 )
 
 for name in "${TOOL_BINS[@]}"; do
     path="$(command -v "${name}" 2>/dev/null || true)"
     [ -n "${path}" ] && copy_with_ldd "${path}"
 done
+
+# python-exec dispatch tree (emerge shebang: #!/usr/bin/python-exec2c)
+if [ -d /usr/lib/python-exec ]; then
+    mkdir -p "${DEST}/usr/lib"
+    cp -a /usr/lib/python-exec "${DEST}/usr/lib/"
+fi
 
 # Portage Python modules + config (binpkg-only installs at runtime)
 PYVER="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"

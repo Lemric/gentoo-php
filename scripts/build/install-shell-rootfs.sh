@@ -60,6 +60,13 @@ copy_elf_closure() {
     done
 }
 
+install_busybox_applets() {
+    local cmd
+    for cmd in $(/bin/busybox --list); do
+        [ -e "${ROOTFS}/bin/${cmd}" ] || ln -sf busybox "${ROOTFS}/bin/${cmd}"
+    done
+}
+
 install_busybox() {
     local bb
     emerge --verbose sys-apps/busybox
@@ -163,7 +170,10 @@ install_busybox
 install_bash
 
 case "${PROFILE}" in
-    cli|build) install_cli_extras ;;
+    cli|build)
+        install_cli_extras
+        install_busybox_applets
+        ;;
 esac
 
 verify_rootfs

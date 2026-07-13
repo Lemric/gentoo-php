@@ -225,6 +225,13 @@ RUN mkdir -p /staging/usr/local /staging/usr/src \
     && cp -a /usr/local/. /staging/usr/local/ \
     && cp -a /usr/src/php.tar.xz /staging/usr/src/php.tar.xz \
     && bundle-install-stack.sh /staging/usr/local/libexec/install \
+    && IR=/staging/usr/local/libexec/install \
+    && for sub in usr/bin usr/sbin usr/lib usr/lib64 lib lib64; do \
+        if [ -d "${IR}/${sub}" ]; then \
+            mkdir -p "/staging/${sub}"; \
+            cp -a "${IR}/${sub}/." "/staging/${sub}/"; \
+        fi; \
+    done \
     && collect-runtime.sh /staging /usr/local cli build \
     && analyze-deps.sh /staging /usr/local
 
@@ -247,6 +254,13 @@ RUN mkdir -p /staging/usr/local /staging/usr/src \
     && cp -a /usr/local/. /staging/usr/local/ \
     && cp -a /usr/src/php.tar.xz /staging/usr/src/php.tar.xz \
     && bundle-install-stack.sh /staging/usr/local/libexec/install \
+    && IR=/staging/usr/local/libexec/install \
+    && for sub in usr/bin usr/sbin usr/lib usr/lib64 lib lib64; do \
+        if [ -d "${IR}/${sub}" ]; then \
+            mkdir -p "/staging/${sub}"; \
+            cp -a "${IR}/${sub}/." "/staging/${sub}/"; \
+        fi; \
+    done \
     && collect-runtime.sh /staging /usr/local fpm build \
     && analyze-deps.sh /staging /usr/local \
     && /usr/local/bin/fix-fpm-config.sh /staging/usr/local \
