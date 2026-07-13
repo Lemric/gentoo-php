@@ -58,11 +58,16 @@ step "5/9  Health probes + CLI shell"
 docker run --rm --entrypoint /usr/local/bin/php "${IMG_CLI}" "${HEALTHCHECK}" health
 docker run --rm --entrypoint /bin/sh "${IMG_CLI}" -c '
     php -v >/dev/null && echo "  [OK] /bin/sh + php"
+    /bin/bash --version >/dev/null && echo "  [OK] /bin/bash"
     printf "%s\n" "#!/usr/bin/env php" "<?php echo \"env-shebang-ok\\n\";" > /tmp/t.php
     chmod +x /tmp/t.php && /tmp/t.php | grep -q env-shebang-ok && echo "  [OK] #!/usr/bin/env php"
 '
+docker run --rm --entrypoint /bin/bash "${IMG_FPM}" -c '/bin/bash --version >/dev/null && echo "  [OK] FPM /bin/bash"'
 docker run --rm "${IMG_FPM}" php-fpm -t
-docker run --rm --entrypoint /usr/local/bin/php "${IMG_FPM}" "${HEALTHCHECK}" readiness
+FPM_CID="$(docker run -d "${IMG_FPM}")"
+trap 'docker rm -f "${FPM_CID}" >/dev/null 2>&1 || true' EXIT
+sleep 3
+docker exec "${FPM_CID}" /usr/local/bin/php "${HEALTHCHECK}" readiness
 
 step "6/9  Base extensions + HTTPS + framework runtime (CLI/FPM)"
 docker run --rm "${IMG_CLI}" -r 'echo OPENSSL_VERSION_TEXT, PHP_EOL;'

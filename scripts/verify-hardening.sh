@@ -14,6 +14,8 @@ echo ">>> verify-hardening: ${IMAGE} (profile=${PROFILE})"
 if [ "${PROFILE}" = "cli" ]; then
     docker run --rm --entrypoint /bin/sh "${IMAGE}" -c '
         test -x /bin/sh && test -x /bin/busybox || exit 1
+        test -x /bin/bash && test -x /usr/bin/bash || exit 1
+        /bin/bash --version >/dev/null
         test -x /usr/bin/env || exit 1
         test -x /usr/bin/wget || exit 1
         test -x /usr/bin/php || exit 1
@@ -22,8 +24,8 @@ if [ "${PROFILE}" = "cli" ]; then
         /usr/bin/env php -v >/dev/null
         wget -q -O /dev/null -T 20 https://getcomposer.org/installer
         test -x /usr/local/bin/docker-php-entrypoint || exit 1
-        echo "OK: /bin/sh + env/wget/php + /etc/services"
-    ' || fail "CLI shell/env/wget/php"
+        echo "OK: /bin/sh + /bin/bash + env/wget/php"
+    ' || fail "CLI shells/env/wget/php"
 
     docker run --rm --entrypoint /usr/local/bin/php "${IMAGE}" -r '
         $forbidden = [
@@ -43,6 +45,13 @@ else
     docker run --rm "${IMAGE}" php-fpm -t >/dev/null \
         || fail "FPM entrypoint + php-fpm -t"
 
+    docker run --rm --entrypoint /bin/bash "${IMAGE}" -c '
+        test -x /bin/sh && test -x /bin/bash || exit 1
+        /bin/bash --version >/dev/null
+        test -x /usr/local/bin/docker-php-entrypoint || exit 1
+        echo "OK: FPM /bin/sh + /bin/bash"
+    ' || fail "FPM shells"
+
     docker run --rm --entrypoint /usr/local/bin/php "${IMAGE}" -r '
         $forbidden = [
             "/usr/bin/emerge", "/usr/bin/gcc",
@@ -56,15 +65,7 @@ else
                 exit(1);
             }
         }
-        if (!is_file("/bin/sh") || !is_file("/bin/busybox")) {
-            fwrite(STDERR, "missing entrypoint shell\n");
-            exit(1);
-        }
-        if (!is_executable("/usr/local/bin/docker-php-entrypoint")) {
-            fwrite(STDERR, "missing docker-php-entrypoint\n");
-            exit(1);
-        }
-        echo "OK: FPM entrypoint shell only\n";
+        echo "OK: forbidden paths absent\n";
     ' || fail "forbidden paths in FPM"
 fi
 

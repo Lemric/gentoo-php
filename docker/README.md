@@ -19,8 +19,9 @@ make cli          # single target (uses BuildKit cache from prior all)
 | `cli` / `fpm` | FROM scratch production runtime |
 | `cli-build` / `fpm-build` | multi-stage extension helpers |
 | `scratch-runtime` | passwd, CA, `/tmp` — **FPM** skeleton (no shell) |
-| `scratch-runtime-cli` | + static busybox `/bin/sh`, entrypoint — **CLI** only |
-| `scratch-runtime-build` | busybox + entrypoint — `*-build` helpers |
+| `scratch-runtime-cli` | + `/bin/sh`, `/bin/bash`, entrypoint — **CLI** |
+| `scratch-runtime` | + `/bin/sh`, `/bin/bash`, entrypoint — **FPM** |
+| `scratch-runtime-build` | shells + entrypoint — `*-build` helpers |
 
 BuildKit graph after `builder-php`:
 

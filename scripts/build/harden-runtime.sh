@@ -87,7 +87,7 @@ if find "${STAGING}" -type f -perm /6000 | grep -q .; then
     exit 1
 fi
 
-# Staging must not ship a full shell — CLI /bin/sh comes from scratch-runtime-cli; FPM from scratch-runtime (entrypoint only).
+# Staging must not ship shells — /bin/sh and /bin/bash live in scratch-runtime* rootfs layers.
 if find "${STAGING}" \( -name 'busybox' -o -name 'bash' -o -name 'sh' \) | grep -q .; then
     echo "harden-runtime: shell binary detected in staging" >&2
     find "${STAGING}" \( -name 'busybox' -o -name 'bash' -o -name 'sh' \) >&2

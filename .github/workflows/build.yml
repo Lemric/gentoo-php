@@ -120,7 +120,10 @@ jobs:
           docker run --rm "$build" test -x /usr/local/bin/pie
           docker run --rm "$build" test -x /usr/local/bin/phpize
           docker run --rm "${repo}:fpm-${ver}${suffix}" php-fpm -t
-          docker run --rm --entrypoint /usr/local/bin/php "$fpm" /usr/local/libexec/php/docker-php-healthcheck.php readiness
+          FPM_CID="$(docker run -d "$fpm")"
+          trap 'docker rm -f "${FPM_CID}" >/dev/null 2>&1 || true' EXIT
+          sleep 3
+          docker exec "$FPM_CID" /usr/local/bin/php /usr/local/libexec/php/docker-php-healthcheck.php readiness
 
   manifest:
     name: publish multi-arch manifests

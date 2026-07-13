@@ -181,11 +181,11 @@ Official `php-fpm` starts as root, drops to `www-data`. We run `USER 82:82` from
 
 ### scratch-runtime-cli
 
-Static busybox `/bin/sh` + `/usr/bin/env` + `/usr/bin/php` symlink — **CLI production only**.
+Static busybox `/bin/sh` + Gentoo `/bin/bash` + `/usr/bin/env` + `/usr/bin/wget` + `/usr/bin/php` symlink.
 
 ### scratch-runtime (FPM)
 
-Static busybox `/bin/sh` + `docker-php-entrypoint` only (no wget/env). passwd, CA, `/tmp`.
+Static busybox `/bin/sh` + Gentoo `/bin/bash` + `docker-php-entrypoint`. passwd, CA, `/tmp`.
 
 ### scratch-runtime-build
 
@@ -298,7 +298,7 @@ docker buildx bake -f docker-bake.hcl all
 | NX/ASLR | Kernel + PIE (runtime) |
 | CET | `USE=cet` where CPU supports |
 | Non-root | USER 82:82 always |
-| No shell (fpm) | FPM: busybox `/bin/sh` for entrypoint only; CLI: full busybox |
+| No shell (fpm) | `/bin/sh` + `/bin/bash` in cli and fpm rootfs |
 | PHP lockdown | `hardening-production.ini` — prod defaults, no `disable_functions` (docker-library parity) |
 | FPM pool | `security.limit_extensions`; optional `hardening-strict.ini` downstream |
 | Read-only FS | K8s `readOnlyRootFilesystem` + `/tmp` emptyDir |
@@ -312,7 +312,7 @@ docker buildx bake -f docker-bake.hcl all
 |------|----------|----------------|
 | Base OS | Debian slim | scratch |
 | Root user | FPM starts root | Always nonroot |
-| Shell | `/bin/sh` (dash) | busybox (FPM: entrypoint-only) |
+| Shell | `/bin/sh` (dash) + `/bin/bash` | busybox `/bin/sh` + Gentoo `/bin/bash` |
 | Entrypoint | `docker-php-entrypoint` | same |
 | Compiler flags | `-O2` | `-O3` + ThinLTO |
 | phpdbg | CLI only | CLI builder only, stripped from runtime |

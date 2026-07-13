@@ -1,6 +1,6 @@
 # FPM on Kubernetes — hardened startup / liveness / readiness probes
 #
-# Production fpm-* images: no /bin/sh — probes use php or php-fpm directly.
+# Production fpm-* images: probes use php or php-fpm directly (shells available for debug).
 apiVersion: apps/v1
 kind: Deployment
 metadata:

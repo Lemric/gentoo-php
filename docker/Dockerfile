@@ -253,8 +253,8 @@ RUN mkdir -p /staging/usr/local /staging/usr/src \
     && ! grep -Fq 'NONE/' /staging/usr/local/etc/php-fpm.conf
 
 # -----------------------------------------------------------------------------
-# scratch-runtime — FPM skeleton + minimal /bin/sh for docker-php-entrypoint (docker-library parity)
-# scratch-runtime-build — busybox + entrypoint for cli-build / fpm-build only
+# scratch-runtime — FPM skeleton + /bin/sh + /bin/bash + docker-php-entrypoint
+# scratch-runtime-build — shells + entrypoint for cli-build / fpm-build
 # -----------------------------------------------------------------------------
 FROM builder-base AS scratch-runtime
 ARG NONROOT_UID
@@ -264,7 +264,8 @@ ARG PORTAGE_TMPFS_SIZE
 ARG GENTOO_CACHE_ID
 
 COPY scripts/build/ensure-ca-bundle.sh /usr/local/bin/ensure-ca-bundle.sh
-RUN chmod +x /usr/local/bin/ensure-ca-bundle.sh \
+COPY scripts/build/install-shell-rootfs.sh /usr/local/bin/install-shell-rootfs.sh
+RUN chmod +x /usr/local/bin/ensure-ca-bundle.sh /usr/local/bin/install-shell-rootfs.sh \
     && mkdir -p /rootfs/etc /rootfs/tmp /rootfs/usr/local/bin /rootfs/var/www/html \
     && printf '%s:x:%s:%s:%s:/var/www/html:/sbin/nologin\n' \
         "${NONROOT_USER}" "${NONROOT_UID}" "${NONROOT_GID}" "${NONROOT_USER}" \
@@ -287,18 +288,11 @@ RUN --mount=type=cache,target=/var/cache/distfiles,id=gentoo-distfiles-${GENTOO_
     --mount=type=tmpfs,target=/var/tmp/portage,size=${PORTAGE_TMPFS_SIZE} \
     mkdir -p /var/tmp/portage /var/cache/binhost \
     && export PORTAGE_TMPDIR=/var/tmp/portage \
-    && emerge --verbose sys-apps/busybox \
-    && BB="$(readlink -f "$(command -v busybox)")" \
-    && mkdir -p /rootfs/bin \
-    && cp -L "${BB}" /rootfs/bin/busybox \
-    && strip --strip-all /rootfs/bin/busybox \
-    && ln -sf busybox /rootfs/bin/sh \
-    && file /rootfs/bin/busybox | grep -qi 'statically linked' \
+    && install-shell-rootfs.sh /rootfs fpm \
     && chmod 755 /rootfs/usr/local/bin/docker-php-entrypoint \
-    && head -n1 /rootfs/usr/local/bin/docker-php-entrypoint | grep -q '^#!/bin/sh$' \
-    && echo fpm-entrypoint-ok
+    && head -n1 /rootfs/usr/local/bin/docker-php-entrypoint | grep -q '^#!/bin/sh$'
 
-# CLI production: static busybox /bin/sh + upstream entrypoint (script runners, docker-library parity).
+# CLI production: /bin/sh + /bin/bash + upstream entrypoint (docker-library parity).
 FROM builder-base AS scratch-runtime-cli
 ARG NONROOT_UID
 ARG NONROOT_GID
@@ -307,7 +301,8 @@ ARG PORTAGE_TMPFS_SIZE
 ARG GENTOO_CACHE_ID
 
 COPY scripts/build/ensure-ca-bundle.sh /usr/local/bin/ensure-ca-bundle.sh
-RUN chmod +x /usr/local/bin/ensure-ca-bundle.sh \
+COPY scripts/build/install-shell-rootfs.sh /usr/local/bin/install-shell-rootfs.sh
+RUN chmod +x /usr/local/bin/ensure-ca-bundle.sh /usr/local/bin/install-shell-rootfs.sh \
     && mkdir -p /rootfs/etc /rootfs/tmp /rootfs/usr/local/bin /rootfs/var/www/html \
     && printf '%s:x:%s:%s:%s:/var/www/html:/sbin/nologin\n' \
         "${NONROOT_USER}" "${NONROOT_UID}" "${NONROOT_GID}" "${NONROOT_USER}" \
@@ -330,22 +325,9 @@ RUN --mount=type=cache,target=/var/cache/distfiles,id=gentoo-distfiles-${GENTOO_
     --mount=type=tmpfs,target=/var/tmp/portage,size=${PORTAGE_TMPFS_SIZE} \
     mkdir -p /var/tmp/portage /var/cache/binhost \
     && export PORTAGE_TMPDIR=/var/tmp/portage \
-    && emerge --verbose sys-apps/busybox \
-    && BB="$(readlink -f "$(command -v busybox)")" \
-    && mkdir -p /rootfs/bin \
-    && cp -L "${BB}" /rootfs/bin/busybox \
-    && strip --strip-all /rootfs/bin/busybox \
-    && ln -sf busybox /rootfs/bin/sh \
-    && mkdir -p /rootfs/usr/bin \
-    && ln -sf ../../bin/busybox /rootfs/usr/bin/env \
-    && ln -sf ../../bin/busybox /rootfs/usr/bin/wget \
-    && ln -sf ../local/bin/php /rootfs/usr/bin/php \
-    && file /rootfs/bin/busybox | grep -qi 'statically linked' \
-    && grep -qE '^(http|https)[[:space:]]+[0-9]+' /rootfs/etc/services \
+    && install-shell-rootfs.sh /rootfs cli \
     && chmod 755 /rootfs/usr/local/bin/docker-php-entrypoint \
-    && head -n1 /rootfs/usr/local/bin/docker-php-entrypoint | grep -q '^#!/bin/sh$' \
-    && /rootfs/bin/busybox wget -q -O /dev/null -T 20 https://getcomposer.org/installer \
-    && echo cli-wget-ok
+    && head -n1 /rootfs/usr/local/bin/docker-php-entrypoint | grep -q '^#!/bin/sh$'
 
 FROM builder-base AS scratch-runtime-build
 ARG NONROOT_UID
@@ -357,7 +339,8 @@ ARG GENTOO_CACHE_ID
 ARG GENTOO_SYNC
 
 COPY scripts/build/ensure-ca-bundle.sh /usr/local/bin/ensure-ca-bundle.sh
-RUN chmod +x /usr/local/bin/ensure-ca-bundle.sh \
+COPY scripts/build/install-shell-rootfs.sh /usr/local/bin/install-shell-rootfs.sh
+RUN chmod +x /usr/local/bin/ensure-ca-bundle.sh /usr/local/bin/install-shell-rootfs.sh \
     && mkdir -p /rootfs/etc /rootfs/tmp /rootfs/root /rootfs/usr/local/bin /rootfs/usr/src /rootfs/var/www/html \
     && printf 'root:x:0:0:root:/root:/bin/sh\n' > /rootfs/etc/passwd \
     && printf '%s:x:%s:%s:%s:/var/www/html:/sbin/nologin\n' \
@@ -388,22 +371,9 @@ RUN --mount=type=cache,target=/var/cache/distfiles,id=gentoo-distfiles-${GENTOO_
     --mount=type=tmpfs,target=/var/tmp/portage,size=${PORTAGE_TMPFS_SIZE} \
     mkdir -p /var/tmp/portage /var/cache/binhost \
     && export PORTAGE_TMPDIR=/var/tmp/portage \
-    && emerge --verbose sys-apps/busybox \
-    && BB="$(readlink -f "$(command -v busybox)")" \
-    && mkdir -p /rootfs/bin \
-    && cp -L "${BB}" /rootfs/bin/busybox \
-    && strip --strip-all /rootfs/bin/busybox \
-    && ln -sf busybox /rootfs/bin/sh \
-    && mkdir -p /rootfs/usr/bin \
-    && ln -sf ../../bin/busybox /rootfs/usr/bin/env \
-    && ln -sf ../../bin/busybox /rootfs/usr/bin/wget \
-    && ln -sf ../local/bin/php /rootfs/usr/bin/php \
-    && file /rootfs/bin/busybox | grep -qi 'statically linked' \
-    && grep -qE '^(http|https)[[:space:]]+[0-9]+' /rootfs/etc/services \
+    && install-shell-rootfs.sh /rootfs build \
     && chmod 755 /rootfs/usr/local/bin/docker-php-entrypoint \
-    && head -n1 /rootfs/usr/local/bin/docker-php-entrypoint | grep -q '^#!/bin/sh$' \
-    && /rootfs/bin/busybox wget -q -O /dev/null -T 20 https://getcomposer.org/installer \
-    && echo build-wget-ok
+    && head -n1 /rootfs/usr/local/bin/docker-php-entrypoint | grep -q '^#!/bin/sh$'
 
 # -----------------------------------------------------------------------------
 # cli / fpm — FROM scratch (shared scratch-runtime + variant collect)
@@ -470,7 +440,7 @@ LABEL org.opencontainers.image.title="gentoo-php-fpm" \
       org.opencontainers.image.base.name="scratch"
 
 ENV PHP_INI_DIR=/usr/local/etc/php \
-    PATH=/usr/local/bin:/usr/local/sbin \
+    PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/bin \
     SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
     SSL_CERT_DIR=/etc/ssl/certs \
     TZ=UTC
