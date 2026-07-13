@@ -21,6 +21,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      actions: write  # required for BuildKit cache-to: type=gha export
 
     strategy:
       fail-fast: false
@@ -41,7 +42,6 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io

@@ -56,8 +56,15 @@ target "_common" {
     GENTOO_SYNC         = GENTOO_SYNC
   }
   platforms  = ["linux/${ARCH}"]
-  cache-from = CACHE_SCOPE != "" ? ["type=gha,scope=${CACHE_SCOPE}"] : []
-  cache-to   = CACHE_SCOPE != "" ? ["type=gha,mode=max,scope=${CACHE_SCOPE}"] : []
+  # GHA cache: fast restore within 10 GB/repo limit; registry: durable fallback for heavy Gentoo layers
+  cache-from = CACHE_SCOPE != "" ? [
+    "type=gha,scope=${CACHE_SCOPE}",
+    "type=registry,ref=${REGISTRY}/${IMAGE_NAME}:buildcache-${ARCH}",
+  ] : []
+  cache-to = CACHE_SCOPE != "" ? [
+    "type=gha,mode=max,scope=${CACHE_SCOPE}",
+    "type=registry,ref=${REGISTRY}/${IMAGE_NAME}:buildcache-${ARCH},mode=max",
+  ] : []
 }
 
 target "builder-php" {

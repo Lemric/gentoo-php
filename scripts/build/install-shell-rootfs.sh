@@ -106,7 +106,7 @@ install_cli_extras() {
 }
 
 verify_rootfs() {
-    local bash_bin interp
+    local bash_bin bash_resolved interp
     test -x "${ROOTFS}/bin/sh" || {
         echo "install-shell-rootfs: /bin/sh missing" >&2
         exit 1
@@ -121,11 +121,16 @@ verify_rootfs() {
         echo "install-shell-rootfs: bash binary missing" >&2
         exit 1
     }
-    file "${bash_bin}" | grep -qi 'ELF' || {
-        echo "install-shell-rootfs: bash is not ELF (${bash_bin})" >&2
+    bash_resolved="$(readlink -f "${bash_bin}" 2>/dev/null || true)"
+    [ -n "${bash_resolved}" ] && [ -f "${bash_resolved}" ] || {
+        echo "install-shell-rootfs: bash symlink target missing (${bash_bin})" >&2
         exit 1
     }
-    interp="$(readelf -l "${bash_bin}" 2>/dev/null | awk '/interpreter/ {print $NF}' | tr -d '[]' || true)"
+    file -L "${bash_bin}" | grep -qi 'ELF' || {
+        echo "install-shell-rootfs: bash is not ELF (${bash_resolved})" >&2
+        exit 1
+    }
+    interp="$(readelf -l "${bash_resolved}" 2>/dev/null | awk '/interpreter/ {print $NF}' | tr -d '[]' || true)"
     if [ -n "${interp}" ] && [ ! -e "${ROOTFS}${interp}" ]; then
         echo "install-shell-rootfs: missing interpreter ${interp} in rootfs" >&2
         exit 1
