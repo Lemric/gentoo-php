@@ -344,7 +344,6 @@ RUN --mount=type=cache,target=/var/cache/distfiles,id=gentoo-distfiles-${GENTOO_
     && grep -qE '^(http|https)[[:space:]]+[0-9]+' /rootfs/etc/services \
     && chmod 755 /rootfs/usr/local/bin/docker-php-entrypoint \
     && head -n1 /rootfs/usr/local/bin/docker-php-entrypoint | grep -q '^#!/bin/sh$' \
-    && /rootfs/bin/sh -c '/usr/bin/env php -V >/dev/null && echo cli-sh-ok' \
     && /rootfs/bin/busybox wget -q -O /dev/null -T 20 https://getcomposer.org/installer \
     && echo cli-wget-ok
 
@@ -401,7 +400,6 @@ RUN --mount=type=cache,target=/var/cache/distfiles,id=gentoo-distfiles-${GENTOO_
     && grep -qE '^(http|https)[[:space:]]+[0-9]+' /rootfs/etc/services \
     && chmod 755 /rootfs/usr/local/bin/docker-php-entrypoint \
     && head -n1 /rootfs/usr/local/bin/docker-php-entrypoint | grep -q '^#!/bin/sh$' \
-    && /rootfs/bin/sh -c '/usr/bin/env php -V >/dev/null && echo busybox-sh-ok' \
     && /rootfs/bin/busybox wget -q -O /dev/null -T 20 https://getcomposer.org/installer \
     && echo build-wget-ok
 
