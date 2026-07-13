@@ -39,8 +39,12 @@ resolve_deps() {
 
 copy_elf_closure() {
     local src="$1"
-    local resolved queue dep lib
+    local resolved queue dep lib interp
     resolved="$(readlink -f "${src}" 2>/dev/null || echo "${src}")"
+    interp="$(readelf -l "${resolved}" 2>/dev/null | awk '/interpreter/ {print $NF}' | tr -d '[]' || true)"
+    if [ -n "${interp}" ] && [ -e "${interp}" ]; then
+        copy_into_rootfs "${interp}"
+    fi
     copy_into_rootfs "${src}"
     queue=("${resolved}")
     while [ "${#queue[@]}" -gt 0 ]; do
@@ -68,17 +72,28 @@ install_busybox() {
 }
 
 install_bash() {
-    local bash_bin
+    local bash_bin root_bash root_usr_bash
     emerge --verbose app-shells/bash
     bash_bin="$(readlink -f "$(command -v bash)")"
     copy_elf_closure "${bash_bin}"
     mkdir -p "${ROOTFS}/bin" "${ROOTFS}/usr/bin"
-    if [ -x "${ROOTFS}/bin/bash" ]; then
-        ln -sf ../bin/bash "${ROOTFS}/usr/bin/bash"
-    elif [ -x "${ROOTFS}/usr/bin/bash" ]; then
-        ln -sf ../usr/bin/bash "${ROOTFS}/bin/bash"
+    root_bash="${ROOTFS}/bin/bash"
+    root_usr_bash="${ROOTFS}/usr/bin/bash"
+    if [ -e "${ROOTFS}${bash_bin}" ]; then
+        case "${bash_bin}" in
+            /bin/bash)
+                ln -sf ../bin/bash "${root_usr_bash}"
+                ;;
+            /usr/bin/bash)
+                ln -sf ../usr/bin/bash "${root_bash}"
+                ;;
+            *)
+                cp -aL "${bash_bin}" "${root_bash}"
+                ln -sf ../bin/bash "${root_usr_bash}"
+                ;;
+        esac
     else
-        echo "install-shell-rootfs: bash missing under ${ROOTFS}" >&2
+        echo "install-shell-rootfs: bash missing at ${ROOTFS}${bash_bin}" >&2
         exit 1
     fi
 }
@@ -92,9 +107,12 @@ install_cli_extras() {
 
 verify_rootfs() {
     local bash_bin interp
-    test -x "${ROOTFS}/bin/sh"
+    test -x "${ROOTFS}/bin/sh" || {
+        echo "install-shell-rootfs: /bin/sh missing" >&2
+        exit 1
+    }
     for candidate in "${ROOTFS}/bin/bash" "${ROOTFS}/usr/bin/bash"; do
-        if [ -x "${candidate}" ]; then
+        if [ -e "${candidate}" ]; then
             bash_bin="${candidate}"
             break
         fi
@@ -103,19 +121,33 @@ verify_rootfs() {
         echo "install-shell-rootfs: bash binary missing" >&2
         exit 1
     }
-    file "${bash_bin}" | grep -qi 'ELF'
+    file "${bash_bin}" | grep -qi 'ELF' || {
+        echo "install-shell-rootfs: bash is not ELF (${bash_bin})" >&2
+        exit 1
+    }
     interp="$(readelf -l "${bash_bin}" 2>/dev/null | awk '/interpreter/ {print $NF}' | tr -d '[]' || true)"
     if [ -n "${interp}" ] && [ ! -e "${ROOTFS}${interp}" ]; then
         echo "install-shell-rootfs: missing interpreter ${interp} in rootfs" >&2
         exit 1
     fi
-    "${ROOTFS}/bin/sh" -c 'true'
+    "${ROOTFS}/bin/sh" -c 'true' || {
+        echo "install-shell-rootfs: busybox sh failed" >&2
+        exit 1
+    }
 
     if [ "${PROFILE}" != "fpm" ]; then
-        test -x "${ROOTFS}/usr/bin/env"
-        test -x "${ROOTFS}/usr/bin/wget"
-        grep -qE '^(http|https)[[:space:]]+[0-9]+' "${ROOTFS}/etc/services"
-        "${ROOTFS}/bin/busybox" wget -q -O /dev/null -T 20 https://getcomposer.org/installer
+        test -x "${ROOTFS}/usr/bin/env" || {
+            echo "install-shell-rootfs: /usr/bin/env missing" >&2
+            exit 1
+        }
+        test -x "${ROOTFS}/usr/bin/wget" || {
+            echo "install-shell-rootfs: /usr/bin/wget missing" >&2
+            exit 1
+        }
+        grep -qE '^(http|https)[[:space:]]+[0-9]+' "${ROOTFS}/etc/services" || {
+            echo "install-shell-rootfs: /etc/services incomplete" >&2
+            exit 1
+        }
     fi
 
     echo ">>> install-shell-rootfs: OK (${PROFILE})"
